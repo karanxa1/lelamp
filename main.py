@@ -15,6 +15,8 @@ from livekit.plugins import (
     noise_cancellation,
     deepgram,
 )
+from lelamp.service.rgb.rgb_service import RGBService
+from lelamp.service.rgb.led_faces import get_face, get_wake_animation, FACE_PATTERNS
 from kokoro_tts import KokoroTTS
 from mimo_llm import MimoLLM
 from typing import Union
@@ -87,16 +89,34 @@ Rules:
 
         """)
         
-        # Motor and RGB hardware not available - commented out
-        # self.motors_service = MotorsService(port=port, lamp_id=lamp_id, fps=30)
-        # self.rgb_service = RGBService(led_count=64, led_pin=12, led_freq_hz=800000, led_dma=10, led_brightness=255, led_invert=False, led_channel=0)
-        # self.motors_service.start()
-        # self.rgb_service.start()
-        # self.motors_service.dispatch("play", "wake_up")
-        # self.rgb_service.dispatch("solid", (255, 255, 255))
-        # self._set_system_volume(100)
+        # Initialize RGB LED service
+        self.rgb_service = RGBService(
+            led_count=64,
+            led_pin=12,
+            led_freq_hz=800000,
+            led_dma=10,
+            led_brightness=255,
+            led_invert=False,
+            led_channel=0
+        )
+        self.rgb_service.start()
         
-        print("LeLamp initialized (motor and RGB hardware disabled)")
+        # Play wake animation
+        for pattern, duration in get_wake_animation():
+            self.rgb_service.dispatch("paint", pattern)
+            import time
+            time.sleep(duration)
+        
+        # Set to happy face
+        self.rgb_service.dispatch("paint", get_face("happy"))
+        
+        # Motor hardware not available - commented out
+        # self.motors_service = MotorsService(port=port, lamp_id=lamp_id, fps=30)
+        # self.motors_service.start()
+        # self.motors_service.dispatch("play", "wake_up")
+        
+        self._set_system_volume(100)
+        print("LeLamp initialized (RGB enabled, motors disabled)")
         log_event_to_firestore("agent_init", {"lamp_id": lamp_id})
 
     def _set_system_volume(self, volume_percent: int):
@@ -177,15 +197,17 @@ async def entrypoint(ctx: agents.JobContext):
     await agent.set_volume(100)
     log_event_to_firestore("session_start", {"room": str(ctx.room.name)})
     
-    # Half-duplex mode
+    # Half-duplex mode with LED face reactions
     @session.on("agent_started_speaking")
     def on_agent_speaking():
         agent.mute_mic()
+        agent.rgb_service.dispatch("paint", get_face("speaking"))
         print("Nova: Speaking... (mic muted)")
     
     @session.on("agent_stopped_speaking")
     def on_agent_stopped():
         agent.unmute_mic()
+        agent.rgb_service.dispatch("paint", get_face("listening"))
         print("Nova: Listening... (mic active)")
     
     # Log conversations to Firestore
