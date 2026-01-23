@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LeLamp Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="dashboard">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <span class="lamp-icon">💡</span>
+                <h1>LeLamp</h1>
+            </div>
+            <nav class="sidebar-nav">
+                <button class="nav-btn active" data-tab="controls">Controls</button>
+                <button class="nav-btn" data-tab="conversations">Conversations</button>
+                <button class="nav-btn" data-tab="logs">Audit Logs</button>
+            </nav>
+            <div class="sidebar-footer">
+                <div class="connection-status" id="connection-status">
+                    <span class="status-indicator"></span>
+                    <span class="status-label">Connecting...</span>
+                </div>
+                <div class="session-info">
+                    <small>Session: <span id="session-id">—</span></small>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Controls Tab -->
+            <section class="tab-panel active" id="controls-panel">
+                <header class="panel-header">
+                    <h2>Lamp Controls</h2>
+                    <span class="hardware-badge" id="hardware-badge">Checking...</span>
+                </header>
+
+                <div class="controls-grid">
+                    <!-- RGB Control Card -->
+                    <div class="card">
+                        <h3>Light Color</h3>
+                        <div class="color-control">
+                            <div class="color-preview-box" id="color-preview"></div>
+                            <div class="color-sliders">
+                                <div class="slider-row">
+                                    <label>Red</label>
+                                    <input type="range" id="r-slider" min="0" max="255" value="255">
+                                    <input type="number" id="r-input" min="0" max="255" value="255">
+                                </div>
+                                <div class="slider-row">
+                                    <label>Green</label>
+                                    <input type="range" id="g-slider" min="0" max="255" value="255">
+                                    <input type="number" id="g-input" min="0" max="255" value="255">
+                                </div>
+                                <div class="slider-row">
+                                    <label>Blue</label>
+                                    <input type="range" id="b-slider" min="0" max="255" value="255">
+                                    <input type="number" id="b-input" min="0" max="255" value="255">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="preset-row">
+                            <button class="preset-btn" data-r="255" data-g="255" data-b="255">White</button>
+                            <button class="preset-btn" data-r="255" data-g="180" data-b="100">Warm</button>
+                            <button class="preset-btn" data-r="100" data-g="180" data-b="255">Cool</button>
+                            <button class="preset-btn" data-r="255" data-g="100" data-b="150">Pink</button>
+                            <button class="preset-btn" data-r="150" data-g="100" data-b="255">Purple</button>
+                            <button class="preset-btn off" data-r="0" data-g="0" data-b="0">Off</button>
+                        </div>
+                    </div>
+
+                    <!-- Expressions Card -->
+                    <div class="card">
+                        <h3>Motor Expressions</h3>
+                        <div class="expressions-grid" id="expressions-grid">
+                            <div class="loading-text">Loading...</div>
+                        </div>
+                    </div>
+
+                    <!-- Chat Card -->
+                    <div class="card chat-card">
+                        <h3>Chat with Nova</h3>
+                        <div class="chat-interface">
+                            <input type="text" id="chat-input" placeholder="Type a message..." autocomplete="off">
+                            <button class="send-btn" id="send-btn">Send</button>
+                        </div>
+                        <div class="last-conversation" id="last-conversation">
+                            <div class="convo-placeholder">Conversations from STT/TTS will appear here</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Conversations Tab -->
+            <section class="tab-panel" id="conversations-panel">
+                <header class="panel-header">
+                    <h2>Conversation History</h2>
+                    <button class="refresh-btn" id="refresh-conversations">Refresh</button>
+                </header>
+                <div class="conversations-list" id="conversations-list">
+                    <div class="loading-text">Loading conversations...</div>
+                </div>
+            </section>
+
+            <!-- Logs Tab -->
+            <section class="tab-panel" id="logs-panel">
+                <header class="panel-header">
+                    <h2>Audit Logs</h2>
+                    <button class="refresh-btn" id="refresh-logs">Refresh</button>
+                </header>
+                <div class="logs-table-container">
+                    <table class="logs-table" id="logs-table">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Endpoint</th>
+                                <th>Method</th>
+                                <th>Duration</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="logs-tbody">
+                            <tr><td colspan="5" class="loading-text">Loading logs...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
