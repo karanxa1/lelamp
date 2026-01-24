@@ -177,31 +177,43 @@ class EdgeTTSPlayer:
 
     async def _speak_async(self, text: str):
         """Async TTS with streaming playback"""
-        communicate = edge_tts.Communicate(text, self.VOICE)
-        
-        # Collect audio chunks
-        audio_data = bytearray()
-        async for chunk in communicate.stream():
-            if chunk["type"] == "audio":
-                audio_data.extend(chunk["data"])
-        
-        if not audio_data:
-            return
-        
-        # Convert MP3 to PCM and play
         try:
+            communicate = edge_tts.Communicate(text, self.VOICE)
+            
+            # Collect audio chunks
+            audio_data = bytearray()
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    audio_data.extend(chunk["data"])
+            
+            if not audio_data:
+                print("⚠️ No audio data received from Edge TTS")
+                return
+            
+            # Convert MP3 to PCM and play
             import soundfile as sf
             audio_array, sr = sf.read(io.BytesIO(bytes(audio_data)), dtype='float32')
             
-            # Resample if needed
-            if sr != self.sample_rate:
-                sd.play(audio_array, sr)
-            else:
-                sd.play(audio_array, self.sample_rate)
-            sd.wait()
+            # Debug: Show audio device info
+            print(f"🔊 Playing {len(audio_array)/sr:.1f}s audio @ {sr}Hz")
             
+            # Play with timeout protection
+            sd.play(audio_array, sr)
+            
+            # Wait with timeout (max 30 seconds per utterance)
+            timeout = max(30, len(audio_array) / sr + 5)
+            start = time.time()
+            while sd.get_stream().active:
+                if time.time() - start > timeout:
+                    print("⚠️ Audio playback timeout - stopping")
+                    sd.stop()
+                    break
+                time.sleep(0.1)
+                
         except Exception as e:
-            print(f"⚠️ Audio decode error: {e}")
+            print(f"⚠️ TTS playback error: {e}")
+            import traceback
+            traceback.print_exc()
 
 
 class LeLampAgent:
