@@ -102,6 +102,14 @@ try:
 except ImportError as e:
     print(f"⚠️ Motors not available: {e}")
 
+# Vision Service (Hand Tracking)
+VISION_ENABLED = False
+try:
+    from lelamp.service.vision.vision_service import VisionService
+    VISION_ENABLED = True
+except ImportError:
+    print("⚠️ Vision dependencies not found")
+
 
 class EdgeTTSPlayer:
     """Ultra-low latency TTS using Microsoft Edge TTS with queuing"""
@@ -258,6 +266,16 @@ class LeLampAgent:
             except Exception as e:
                 print(f"⚠️ Motors init failed: {e}")
                 self.motors_service = None
+                
+        # Vision Service (Hand Tracking)
+        self.vision_service = None
+        if VISION_ENABLED and self.motors_service:
+            try:
+                # Share the motor service with vision service
+                self.vision_service = VisionService(motor_service=self.motors_service)
+                print("✓ Vision Service initialized (Wait for 'start_tracking' command)")
+            except Exception as e:
+                print(f"⚠️ Vision init failed: {e}")
     
     def _get_settings_dict(self, is_reconnect: bool = False) -> dict:
         """Generate settings with function calling enabled"""
@@ -298,6 +316,11 @@ Animation Guide:
 - 'sad' → Apologizing, bad news, something unfortunate
 - 'shy' → Receiving compliments, being flattered, modest moments
 - 'headshake' → Disagreeing, saying no, correcting mistakes
+
+✋ HAND TRACKING:
+- You have a camera! If user asks to "follow my hand", "track me", or "hand mode" -> Call start_hand_tracking.
+- Explain: "Okay! Show me your hand and I'll follow it. Close your fist to lock/pause."
+- If user says "stop following" -> Call stop_hand_tracking.
 
 🎯 EXAMPLES:
 User: "Hi!" → play 'excited', say "Hey there! What's up?"
@@ -350,6 +373,22 @@ NEVER respond without calling play_animation first!"""
                         }
                     },
                     "required": ["face"]
+                }
+            },
+            {
+                "name": "start_hand_tracking",
+                "description": "Enable Hand Tracking Mode. The lamp will physically follow the user's hand movements. Call this when user says 'follow my hand' or asking to track/see them.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {}
+                }
+            },
+            {
+                "name": "stop_hand_tracking",
+                "description": "Disable Hand Tracking Mode. Return to normal assistant mode. Call when user says 'stop following' or 'stop tracking'.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {}
                 }
             },
             {
@@ -542,6 +581,24 @@ NEVER respond without calling play_animation first!"""
             print(f"🎭 Animation would play: {animation_lower} (no motors)")
             return f"Animation {animation_lower} (motors not connected)"
     
+    def _execute_start_tracking(self) -> str:
+        """Enable hand tracking"""
+        if self.vision_service:
+            self.vision_service.start()
+            print("✋ Hand tracking STARTED")
+            return "Hand tracking started. I am now following your hand."
+        else:
+            return "Cannot start tracking: Camera or Vision Service not available."
+
+    def _execute_stop_tracking(self) -> str:
+        """Disable hand tracking"""
+        if self.vision_service:
+            self.vision_service.stop()
+            print("✋ Hand tracking STOPPED")
+            return "Hand tracking stopped. I returned to normal mode."
+        else:
+            return "Tracking was not active."
+    
     def _handle_function_call(self, message) -> list:
         """Handle FunctionCallRequest - may contain multiple functions"""
         # FunctionCallRequest has a 'functions' array
@@ -575,6 +632,10 @@ NEVER respond without calling play_animation first!"""
                 result = self._execute_set_led_face(args.get("face", "happy"))
             elif func_name == "play_animation":
                 result = self._execute_play_animation(args.get("animation", "nod"))
+            elif func_name == "start_hand_tracking":
+                result = self._execute_start_tracking()
+            elif func_name == "stop_hand_tracking":
+                result = self._execute_stop_tracking()
             else:
                 result = f"Unknown function: {func_name}"
             
