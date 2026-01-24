@@ -17,6 +17,6 @@ sounddevice>=0.5.2
 soundfile>=0.13.1
 edge-tts>=6.1.9
 
-# Hardware dependencies (Raspberry Pi only - comment out on Windows)
-# adafruit-circuitpython-neopixel
-# rpi-ws281x
+# Hardware dependencies (Raspberry Pi only)
+adafruit-circuitpython-neopixel
+rpi-ws281x
