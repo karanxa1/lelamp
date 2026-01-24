@@ -11,15 +11,26 @@ class RGBService(ServiceBase):
                  led_dma: int = 10,
                  led_brightness: int = 255,
                  led_invert: bool = False,
-                 led_channel: int = 0):
+                 led_channel: int = 0,
+                 color_order: str = "GRB"):  # Most WS2812B use GRB
         super().__init__("rgb")
         
         self.led_count = led_count
+        self.color_order = color_order.upper()
         self.strip = PixelStrip(
             led_count, led_pin, led_freq_hz, led_dma, 
             led_invert, led_brightness, led_channel
         )
         self.strip.begin()
+    
+    def _make_color(self, r: int, g: int, b: int) -> int:
+        """Convert RGB to correct color order for the strip"""
+        if self.color_order == "GRB":
+            return Color(g, r, b)  # WS2812B standard
+        elif self.color_order == "BGR":
+            return Color(b, g, r)
+        else:  # RGB
+            return Color(r, g, b)
         
     def handle_event(self, event_type: str, payload: Any):
         if event_type == "solid":
@@ -32,7 +43,7 @@ class RGBService(ServiceBase):
     def _handle_solid(self, color_code: Union[int, tuple]):
         """Fill entire strip with single color"""
         if isinstance(color_code, tuple) and len(color_code) == 3:
-            color = Color(color_code[0], color_code[1], color_code[2])
+            color = self._make_color(color_code[0], color_code[1], color_code[2])
         elif isinstance(color_code, int):
             color = color_code
         else:
@@ -45,7 +56,7 @@ class RGBService(ServiceBase):
         self.logger.debug(f"Applied solid color: {color_code}")
     
     def _handle_paint(self, colors: List[Union[int, tuple]]):
-        """Set individual pixel colors from array"""
+        """Set individual pixel colors from array (8x8 = 64 pixels)"""
         if not isinstance(colors, list):
             self.logger.error(f"Paint payload must be a list, got: {type(colors)}")
             return
@@ -55,7 +66,7 @@ class RGBService(ServiceBase):
         for i in range(max_pixels):
             color_code = colors[i]
             if isinstance(color_code, tuple) and len(color_code) == 3:
-                color = Color(color_code[0], color_code[1], color_code[2])
+                color = self._make_color(color_code[0], color_code[1], color_code[2])
             elif isinstance(color_code, int):
                 color = color_code
             else:

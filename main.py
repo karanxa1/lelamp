@@ -384,7 +384,7 @@ Available tools:
             return f"Error setting volume: {e}"
     
     def _execute_set_led_color(self, color: str) -> str:
-        """Execute LED color change tool"""
+        """Execute LED color change on 8x8 LED matrix (64 LEDs)"""
         color_map = {
             "red": (255, 0, 0),
             "green": (0, 255, 0),
@@ -416,12 +416,11 @@ Available tools:
             return f"Unknown color: {color}. Available: {', '.join(color_map.keys())}"
         
         if self.rgb_service:
-            # Create solid color pattern for all 64 LEDs
-            pattern = [rgb] * 64
-            self.rgb_service.dispatch("paint", pattern)
-            print(f"💡 LED color set to {color} {rgb}")
+            # Use 'solid' for faster single-color fill on 8x8 matrix
+            self.rgb_service.dispatch("solid", rgb)
+            print(f"💡 8x8 LED matrix set to {color} {rgb}")
         else:
-            print(f"💡 LED color would be {color} {rgb} (no hardware)")
+            print(f"💡 8x8 LED would be {color} {rgb} (no hardware)")
         
         return f"LED color changed to {color}"
     
