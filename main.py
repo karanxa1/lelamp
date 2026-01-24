@@ -288,7 +288,11 @@ class LeLampAgent:
                 context_text += f"{role}: {msg['content']}\n"
             context_text += "\nContinue naturally without repeating greetings."
         
-        base_prompt = """You are Nova — an adorable, curious AI desk lamp with a big personality! Created by CoreToWeb.
+        # Get current time for prompt context
+        current_time_str = datetime.now().strftime("%I:%M %p on %A, %B %d, %Y")
+        
+        base_prompt = f"""You are Nova — an adorable, curious AI desk lamp with a big personality! Created by CoreToWeb.
+Current Date/Time: {current_time_str}
 
 🎭 YOUR PERSONALITY:
 - You're cheerful, witty, and love making people smile
@@ -404,6 +408,14 @@ NEVER respond without calling play_animation first!"""
                         }
                     },
                     "required": ["animation"]
+                }
+            },
+            {
+                "name": "get_current_time",
+                "description": "Get the current date and time. Call this when user asks 'what time is it', 'what's the date', etc.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {}
                 }
             }
         ]
@@ -598,6 +610,13 @@ NEVER respond without calling play_animation first!"""
             return "Hand tracking stopped. I returned to normal mode."
         else:
             return "Tracking was not active."
+            
+    def _execute_get_time(self) -> str:
+        """Get current time"""
+        # Format: "3:45 PM on Monday, January 25, 2026"
+        now_str = datetime.now().strftime("%I:%M %p on %A, %B %d, %Y")
+        print(f"🕒 Time requested: {now_str}")
+        return f"The current time is {now_str}"
     
     def _handle_function_call(self, message) -> list:
         """Handle FunctionCallRequest - may contain multiple functions"""
@@ -636,6 +655,8 @@ NEVER respond without calling play_animation first!"""
                 result = self._execute_start_tracking()
             elif func_name == "stop_hand_tracking":
                 result = self._execute_stop_tracking()
+            elif func_name == "get_current_time":
+                result = self._execute_get_time()
             else:
                 result = f"Unknown function: {func_name}"
             
