@@ -1,227 +1,169 @@
-# LeLamp Runtime
+# LeLamp Runtime - Nova AI Voice Assistant
 
 ![](./assets/images/Banner.png)
 
-This repository holds the code for controlling LeLamp. The runtime provides a comprehensive control system for the robotic lamp, including motor control, recording/replay functionality, voice interaction, and testing capabilities.
+An AI-powered robotic desk lamp with voice interaction, animated expressions, and RGB LED faces. Built with LiveKit Agents, Kokoro TTS, and MIMO LLM.
 
-[LeLamp](https://github.com/humancomputerlab/LeLamp) is an open source robot lamp based on [Apple's Elegnt](https://machinelearning.apple.com/research/elegnt-expressive-functional-movement), made by [[Human Computer Lab]](https://www.humancomputerlab.com/)
+**Nova** is your friendly AI desk lamp assistant, created by CoreToWeb!
 
-## Overview
+## Features
 
-LeLamp Runtime is a Python-based control system that interfaces with the hardware components of LeLamp including:
+- 🎤 **Voice Interaction** - Real-time speech recognition (Deepgram) and local TTS (Kokoro)
+- 💡 **8x8 LED Matrix Faces** - Animated expressions that react to conversation state
+- 🤖 **5-DOF Robotic Arm** - Pre-recorded motor animations for expressions
+- 🧠 **AI Responses** - MIMO v2 Flash LLM for intelligent conversations
+- 📝 **Firebase Logging** - All conversations stored in Firestore
+- 🌐 **Web Dashboard** - Control panel for RGB, expressions, and chat history
 
-- Servo motors for articulated movement
-- Audio system (microphone and speaker)
-- RGB LED lighting
-- Camera system
-- Voice interaction capabilities
+## Quick Start (Raspberry Pi)
+
+### 1. Install UV & Clone
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source ~/.bashrc
+git clone <your-repo-url> ~/lelamp
+cd ~/lelamp
+```
+
+### 2. Install Dependencies
+```bash
+# With hardware support:
+uv sync --extra hardware
+
+# Without hardware (simulation):
+uv sync
+```
+
+### 3. Download TTS Models
+```bash
+wget -4 https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx
+wget -4 https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin
+```
+
+### 4. Configure Environment
+Create `.env` file:
+```env
+MIMO_API_KEY=your_mimo_api_key
+LIVEKIT_URL=wss://your-livekit-url
+LIVEKIT_API_KEY=your_livekit_key
+LIVEKIT_API_SECRET=your_livekit_secret
+DEEPGRAM_API_KEY=your_deepgram_key
+```
+
+### 5. Configure Audio (Raspberry Pi)
+```bash
+# Create ALSA config for USB mic + 3.5mm output
+cat > ~/.asoundrc << 'EOF'
+pcm.!default {
+    type asym
+    playback.pcm "plughw:0,0"
+    capture.pcm "plughw:3,0"
+}
+ctl.!default {
+    type hw
+    card 0
+}
+EOF
+
+# Load audio driver if needed
+sudo modprobe snd_bcm2835
+```
+
+### 6. Run the Agent
+```bash
+sudo -E ~/.local/bin/uv run main.py console
+```
 
 ## Project Structure
 
 ```
 lelamp_runtime/
-├── main.py                 # Main runtime entry point
-├── pyproject.toml         # Project configuration and dependencies
-├── lelamp/                # Core package
-│   ├── setup_motors.py    # Motor configuration and setup
-│   ├── calibrate.py       # Motor calibration utilities
-│   ├── list_recordings.py # List all recorded motor movements
-│   ├── record.py          # Movement recording functionality
-│   ├── replay.py          # Movement replay functionality
-│   ├── follower/          # Follower mode functionality
-│   ├── leader/            # Leader mode functionality
-│   └── test/              # Hardware testing modules
-└── uv.lock               # Dependency lock file
+├── main.py                     # Main voice agent (Nova)
+├── smooth_animation.py         # Alternative agent with smooth motor animations
+├── kokoro_tts.py              # Local Kokoro ONNX TTS plugin
+├── mimo_llm.py                # MIMO v2 Flash LLM client
+├── voice_chat.py              # Standalone voice-to-voice chat
+├── web_server.py              # FastAPI dashboard + Firebase logging
+├── firebase-credentials.json  # Firestore service account
+├── static/                    # Web dashboard files
+│   ├── index.html
+│   ├── app.js
+│   └── style.css
+└── lelamp/                    # Hardware control package
+    ├── follower/              # Robot arm follower controller
+    ├── leader/                # Teleoperator for teaching movements
+    ├── service/
+    │   ├── motors/            # Motor animation service
+    │   └── rgb/               # LED control + face patterns
+    │       ├── rgb_service.py
+    │       └── led_faces.py   # 8x8 LED face patterns
+    ├── recordings/            # Pre-recorded motor animations
+    ├── calibrate.py           # Motor calibration
+    ├── record.py              # Record new animations
+    └── replay.py              # Replay animations
 ```
 
-## Installation
+## Hardware Requirements
 
-### Prerequisites
+| Component | Details |
+|-----------|---------|
+| **Raspberry Pi** | Pi 4 or Pi 5 recommended |
+| **Motors** | 5x Feetech STS3215 servos |
+| **LED Matrix** | 8x8 WS2812B NeoPixels (64 LEDs) |
+| **Microphone** | USB PnP Sound Device |
+| **Speaker** | 3.5mm audio output |
 
-- UV package manager
-- Hardware components properly assembled (see main LeLamp documentation)
-
-### Setup
-
-1. Clone the runtime repository:
-
-```bash
-git clone https://github.com/humancomputerlab/lelamp_runtime.git
-cd lelamp_runtime
-```
-
-2. Install UV (if not already installed):
+## Motor Calibration
 
 ```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
-
-3. Install dependencies:
-
-```bash
-# If on your personal computer
-uv sync
-
-# If on Raspberry Pi
-uv sync --extra hardware
-```
-
-**Note**: For motor setup and control, LeLamp Runtime can run on your computer and you only need to run `uv sync`. For other functionality that connects to the head Pi (LED control, audio, camera), you need to install LeLamp Runtime on that Pi and run `uv sync --extra hardware`.
-
-If you have LFS problems, run the following command:
-
-```bash
-GIT_LFS_SKIP_SMUDGE=1 uv sync
-```
-
-If your installation process is slow, use the following environment variable:
-
-```bash
-export UV_CONCURRENT_DOWNLOADS=1
-```
-
-### Dependencies
-
-The runtime includes several key dependencies:
-
-- **feetech-servo-sdk**: For servo motor control
-- **lerobot**: Robotics framework integration
-- **livekit-agents**: Real-time voice interaction
-- **numpy**: Mathematical operations
-- **sounddevice**: Audio input/output
-- **adafruit-circuitpython-neopixel**: RGB LED control (hardware)
-- **rpi-ws281x**: Raspberry Pi LED control (hardware)
-
-## Core Functionality
-
-Prior to following the instructions here, you should have an overview of how to control LeLamp through [this tutorial](https://github.com/humancomputerlab/LeLamp/blob/master/docs/5.%20LeLamp%20Control.md).
-
-### 1. Motor Setup and Calibration
-
-1. **Find the servo driver port**:
-
-This command finds the port your motor driver is connected to.
-
-```bash
+# Find your motor port
 uv run lerobot-find-port
+
+# Calibrate motors
+sudo uv run -m lelamp.calibrate --id lelamp --port /dev/ttyACM0
 ```
 
-2. **Setup motors with unique IDs**:
-
-This command set up each motor of LeLamp with an unique ID.
+## Recording New Animations
 
 ```bash
-uv run -m lelamp.setup_motors --id your_lamp_name --port the_port_found_in_previous_step
+# Record a movement sequence
+uv run -m lelamp.record --id lelamp --port /dev/ttyACM0 --name my_animation
+
+# Replay it
+uv run -m lelamp.replay --id lelamp --port /dev/ttyACM0 --name my_animation
 ```
 
-3. **Calibrate motors**:
+## LED Face Patterns
 
-This command calibrate your motors.
+The 8x8 LED matrix displays animated faces:
 
-```bash
-sudo uv run -m lelamp.calibrate --id your_lamp_name --port the_port_found_in_previous_step
-```
+| State | Description | Color |
+|-------|-------------|-------|
+| `listening` | Wide eyes, waiting for input | Cyan |
+| `speaking` | Mouth open animation | Green |
+| `happy` | Smile face | Yellow |
+| `thinking` | Squinting | Purple |
+| `idle` | Gentle breathing | Dim white |
 
-The calibration process will:
+Faces automatically change based on Nova's conversation state.
 
-- Calibrate both follower and leader modes
-- Ensure proper servo positioning and response
-- Set baseline positions for accurate movement
-
-### 2. Unit Testing
-
-The runtime includes comprehensive testing modules to verify all hardware components:
-
-#### RGB LEDs
-
-```bash
-# Run with sudo for hardware access
-sudo uv run -m lelamp.test.test_rgb
-```
-
-#### Audio System (Microphone and Speaker)
-
-```bash
-uv run -m lelamp.test.test_audio
-```
-
-#### Motors
-
-```bash
-uv run -m lelamp.test.test_motors --id your_lamp_name --port the_port_found_in_previous_step
-```
-
-### 3. Record and Replay Episodes
-
-One of LeLamp's key features is the ability to record and replay movement sequences:
-
-#### Recording Movement
-
-To record a movement sequence:
-
-```bash
-uv run -m lelamp.record --id your_lamp_name --port the_port_found_in_previous_step --name movement_sequence_name
-```
-
-This will:
-
-- Put the lamp in recording mode
-- Allow you to manually manipulate the lamp
-- Save the movement data to a CSV file
-
-#### Replaying Movement
-
-To replay a recorded movement:
-
-```bash
-uv run -m lelamp.replay --id your_lamp_name --port the_port_found_in_previous_step --name movement_sequence_name
-```
-
-The replay system will:
-
-- Load the movement data from the CSV file
-- Execute the recorded movements with proper timing
-- Reproduce the original motion sequence
-
-#### Listing Recordings
-
-To view all recordings for a specific lamp:
-
-```bash
-uv run -m lelamp.list_recordings --id your_lamp_name
-```
-
-This will display:
-
-- All available recordings for the specified lamp
-- File information including row count
-- Recording names that can be used for replay
-
-#### File Format
-
-Recorded movements are saved as CSV files with the naming convention:
-`{sequence_name}.csv`
-
-## 4. Start upon boot
-
-If you want to start LeLamp's voice app upon booting. Create a systemd service file:
+## Auto-Start on Boot
 
 ```bash
 sudo nano /etc/systemd/system/lelamp.service
 ```
 
-Add this content:
-
-```bash
-ini[Unit]
-Description=Lelamp Runtime Service
+Add:
+```ini
+[Unit]
+Description=LeLamp Nova Service
 After=network.target
 
 [Service]
 Type=simple
-User=pi
-WorkingDirectory=/home/pi/lelamp_runtime
-ExecStart=/usr/bin/sudo uv run main.py console
+User=techspark
+WorkingDirectory=/home/techspark/techspark/lelamp
+ExecStart=/usr/bin/sudo -E /home/techspark/.local/bin/uv run main.py console
 Restart=always
 RestartSec=5
 
@@ -229,87 +171,64 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
-Then enable and start the service:
-
+Enable:
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable lelamp.service
 sudo systemctl start lelamp.service
 ```
 
-For other service controls:
+## Web Dashboard
 
+Access at `http://<pi-ip>:8000` when running `web_server.py`:
+
+- **Controls** - RGB color picker, expression buttons, chat
+- **Conversations** - View chat history from Firestore
+- **Audit Logs** - API request logging
+
+## API Keys Required
+
+| Service | Purpose | Get Key |
+|---------|---------|---------|
+| **MIMO API** | LLM responses | [mimo.dev](https://mimo.dev) |
+| **LiveKit** | Voice rooms | [livekit.io](https://livekit.io) |
+| **Deepgram** | Speech-to-text | [deepgram.com](https://deepgram.com) |
+| **Firebase** | Conversation logging | [firebase.google.com](https://firebase.google.com) |
+
+## Troubleshooting
+
+### Audio Issues
 ```bash
-# Disable from starting on boot
-sudo systemctl disable lelamp.service
+# Check audio devices
+aplay -l
+arecord -l
 
-# Stop the currently running service
-sudo systemctl stop lelamp.service
+# Load audio driver
+sudo modprobe snd_bcm2835
 
-# Check status (should show "disabled" and "inactive")
-sudo systemctl status lelamp.service
+# Test speaker
+speaker-test -D plughw:0,0 -t sine -f 440 -l 1
+
+# Test microphone
+arecord -D plughw:3,0 -r 48000 -f S16_LE -d 3 test.wav
+aplay test.wav
 ```
 
-Note: Boot time might vary with each run and extended usage (>1 hour) can burn the motors.
-
-## Sample Apps
-
-Sample apps to test LeLamp's capabilities.
-
-### LiveKit Voice Agent
-
-To run a conversational agent on LeLamp, create a .env file with the following content in the root of this directory in your Raspberry Pi.
-
+### LED Not Working
 ```bash
-OPENAI_API_KEY=
-LIVEKIT_URL=
-LIVEKIT_API_KEY=
-LIVEKIT_API_SECRET=
-```
-
-On how to get LiveKit secrets, please refer to [LiveKit's guide](https://docs.livekit.io/agents/start/voice-ai/). Install LiveKit CLI, then you can run the following command:
-
-```bash
-lk app env -w
-cat .env.local
-```
-
-This will automatically create an `.env.local` file for you, which contains all the secrets on LiveKit side.
-
-On how to get OpenAI secrets, you can follow this [FAQ](https://help.openai.com/en/articles/4936850-where-do-i-find-my-openai-api-key).
-
-Then you can run the agent app by:
-
-```bash
-# Only need to run this once
-sudo uv run main.py download-files
-
-# Pick one of the below
-# For Discrete Animation Mode
+# Run with sudo for GPIO access
 sudo uv run main.py console
-
-# For Smooth Animation Mode
-sudo uv run smooth_animation.py console
 ```
 
-In case your lamp is not `lelamp`, change the id of the lamp inside main.py:
-
-```py
-async def entrypoint(ctx: agents.JobContext):
-    agent = LeLamp(lamp_id="lelamp") # <- Chnage the name here
-```
-
-## Contributing
-
-This is an open-source project by Human Computer Lab. Contributions are welcome through the GitHub repository.
-
-## Maintainers
-Maintained by [Human Computer Lab](https://www.humancomputerlab.com).
-
-## Acknowledgments & Sponsors
-See [CONTRIBUTORS.md](./CONTRIBUTORS.md) for contributors and their roles.  
-See [SPONSORS.md](./SPONSORS.md) for sponsor thanks and how to support the project.
+### TTS Slow on Pi
+Kokoro TTS uses CPU inference. First response may take 3-5 seconds on Pi 4.
 
 ## License
 
-Check the main [LeLamp repository](https://github.com/humancomputerlab/LeLamp) for licensing information.
+See [LeLamp repository](https://github.com/humancomputerlab/LeLamp) for licensing.
+
+## Credits
+
+- **LeLamp Hardware**: [Human Computer Lab](https://www.humancomputerlab.com)
+- **Nova AI Agent**: CoreToWeb Team
+- **Kokoro TTS**: [thewh1teagle](https://github.com/thewh1teagle/kokoro-onnx)

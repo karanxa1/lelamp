@@ -2,10 +2,11 @@
 # Install with: pip install -r requirements.txt
 
 # Core dependencies
+deepgram-sdk>=5.0.0
+requests>=2.31.0
 feetech-servo-sdk>=1.0.0
+firebase-admin>=6.0.0
 lerobot @ git+https://github.com/huggingface/lerobot
-livekit-agents[openai]~=1.2
-livekit-plugins-noise-cancellation~=0.2
 numpy>=2.2.6
 pvporcupine>=3.0.5
 pvrecorder>=1.2.7
@@ -13,6 +14,8 @@ pyarrow==20.0.0
 pyaudio>=0.2.14
 python-dotenv
 sounddevice>=0.5.2
+soundfile>=0.13.1
+edge-tts>=6.1.9
 
 # Hardware dependencies (Raspberry Pi only - comment out on Windows)
 # adafruit-circuitpython-neopixel
