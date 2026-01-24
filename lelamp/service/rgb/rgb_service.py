@@ -12,7 +12,7 @@ class RGBService(ServiceBase):
                  led_brightness: int = 255,
                  led_invert: bool = False,
                  led_channel: int = 0,
-                 color_order: str = "GRB"):  # Most WS2812B use GRB
+                 color_order: str = "RGB"):  # User's strip uses RGB
         super().__init__("rgb")
         
         self.led_count = led_count
