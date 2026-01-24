@@ -183,6 +183,7 @@ class LeLampAgent:
         
         self.last_user_text = ""
         self.conversation_history = []
+        self.current_volume = 50  # Track current volume for increase/decrease
         
         # 16kHz is optimal for speech STT (faster processing)
         # However, if mic is 44.1kHz/48kHz, using native rate avoids resampling artifacts
@@ -243,13 +244,13 @@ Available tools:
         functions = [
             {
                 "name": "set_volume",
-                "description": "Control the speaker volume. Use when user asks to be louder, quieter, turn up/down, or set a specific volume level.",
+                "description": "Control speaker volume. For 'increase/louder/turn up': use current+20. For 'decrease/quieter/turn down': use current-20. For specific requests: use exact value. Current volume is around 50%.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "volume_percent": {
                             "type": "integer",
-                            "description": "Volume level from 0 to 100. 0=mute, 50=half, 100=maximum"
+                            "description": "Target volume 0-100. For increase: add 20 to current. For decrease: subtract 20 from current."
                         }
                     },
                     "required": ["volume_percent"]
@@ -348,24 +349,36 @@ Available tools:
     def _execute_set_volume(self, volume_percent: int) -> str:
         """Execute volume control tool"""
         try:
-            volume_percent = max(0, min(100, int(volume_percent)))
+            new_volume = max(0, min(100, int(volume_percent)))
+            old_volume = self.current_volume
             
             if sys.platform == "darwin":
                 # Mac: use osascript
                 import subprocess
                 subprocess.run(
-                    ["osascript", "-e", f"set volume output volume {volume_percent}"],
+                    ["osascript", "-e", f"set volume output volume {new_volume}"],
                     capture_output=True, timeout=5
                 )
             else:
                 # Raspberry Pi: use amixer
                 import subprocess
-                subprocess.run(["amixer", "sset", "Master", f"{volume_percent}%"], capture_output=True, timeout=5)
-                subprocess.run(["amixer", "sset", "Line", f"{volume_percent}%"], capture_output=True, timeout=5)
-                subprocess.run(["amixer", "sset", "HP", f"{volume_percent}%"], capture_output=True, timeout=5)
+                subprocess.run(["amixer", "sset", "Master", f"{new_volume}%"], capture_output=True, timeout=5)
+                subprocess.run(["amixer", "sset", "Line", f"{new_volume}%"], capture_output=True, timeout=5)
+                subprocess.run(["amixer", "sset", "HP", f"{new_volume}%"], capture_output=True, timeout=5)
             
-            print(f"🔊 Volume set to {volume_percent}%")
-            return f"Volume set to {volume_percent}%"
+            # Track volume
+            self.current_volume = new_volume
+            
+            # Create informative message
+            if new_volume > old_volume:
+                change = f"increased from {old_volume}% to {new_volume}%"
+            elif new_volume < old_volume:
+                change = f"decreased from {old_volume}% to {new_volume}%"
+            else:
+                change = f"already at {new_volume}%"
+            
+            print(f"🔊 Volume {change}")
+            return f"Volume {change}"
         except Exception as e:
             print(f"⚠️ Volume error: {e}")
             return f"Error setting volume: {e}"
@@ -430,34 +443,49 @@ Available tools:
         
         return f"LED face changed to {face_lower}"
     
-    def _handle_function_call(self, message) -> dict:
-        """Handle FunctionCallRequest and return response"""
-        func_name = getattr(message, "function_name", "") or message.get("function_name", "")
-        func_id = getattr(message, "function_call_id", "") or message.get("function_call_id", "")
+    def _handle_function_call(self, message) -> list:
+        """Handle FunctionCallRequest - may contain multiple functions"""
+        # FunctionCallRequest has a 'functions' array
+        # Each item has: id, name, arguments (JSON string), client_side
+        functions = getattr(message, "functions", [])
         
-        # Get input parameters
-        if hasattr(message, "input"):
-            args = message.input if isinstance(message.input, dict) else {}
-        else:
-            args = message.get("input", {})
+        if not functions:
+            print("⚠️ No functions in FunctionCallRequest")
+            return []
         
-        print(f"🔧 Tool call: {func_name}({args})")
+        responses = []
+        for func in functions:
+            func_id = getattr(func, "id", "")
+            func_name = getattr(func, "name", "")
+            arguments_str = getattr(func, "arguments", "{}")
+            
+            # Parse JSON arguments string
+            try:
+                args = json.loads(arguments_str) if arguments_str else {}
+            except json.JSONDecodeError:
+                args = {}
+            
+            print(f"🔧 Tool call: {func_name}({args})")
+            
+            # Execute the appropriate function
+            if func_name == "set_volume":
+                result = self._execute_set_volume(args.get("volume_percent", 50))
+            elif func_name == "set_led_color":
+                result = self._execute_set_led_color(args.get("color", "white"))
+            elif func_name == "set_led_face":
+                result = self._execute_set_led_face(args.get("face", "happy"))
+            else:
+                result = f"Unknown function: {func_name}"
+            
+            # Correct format per Deepgram SDK: id, name, content (not function_call_id, output)
+            responses.append({
+                "type": "FunctionCallResponse",
+                "id": func_id,
+                "name": func_name,
+                "content": result
+            })
         
-        # Execute the appropriate function
-        if func_name == "set_volume":
-            result = self._execute_set_volume(args.get("volume_percent", 50))
-        elif func_name == "set_led_color":
-            result = self._execute_set_led_color(args.get("color", "white"))
-        elif func_name == "set_led_face":
-            result = self._execute_set_led_face(args.get("face", "happy"))
-        else:
-            result = f"Unknown function: {func_name}"
-        
-        return {
-            "type": "FunctionCallResponse",
-            "function_call_id": func_id,
-            "output": result
-        }
+        return responses
     
     def _handle_message(self, message):
         """Handle incoming WebSocket messages"""
@@ -519,14 +547,15 @@ Available tools:
             print(f"❌ Error: {getattr(message, 'description', 'Unknown')}")
         
         elif msg_type == "FunctionCallRequest":
-            # Handle tool/function calls
-            response = self._handle_function_call(message)
-            if self.connection:
-                try:
-                    self.connection._send(json.dumps(response))
-                    print(f"✓ Sent FunctionCallResponse")
-                except Exception as e:
-                    print(f"⚠️ Error sending function response: {e}")
+            # Handle tool/function calls - may be multiple
+            responses = self._handle_function_call(message)
+            if self.connection and responses:
+                for response in responses:
+                    try:
+                        self.connection._send(json.dumps(response))
+                        print(f"✓ Sent FunctionCallResponse for {response.get('function_call_id', 'unknown')}")
+                    except Exception as e:
+                        print(f"⚠️ Error sending function response: {e}")
 
     
     def _stream_audio(self):
