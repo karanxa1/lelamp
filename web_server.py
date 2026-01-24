@@ -26,14 +26,34 @@ cred = credentials.Certificate("firebase-credentials.json")
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 
-# Try to import hardware services
+# Try to import hardware services (separate so motors work on Mac)
+import glob
+MOTOR_PORT = None
+MOTORS_AVAILABLE = False
+RGB_AVAILABLE = False
+
+# Motors (works on Mac via USB)
 try:
-    from lelamp.service.motors.motors_service import MotorsService
+    from lelamp.service.motors.direct_motors_service import DirectMotorsService
+    ports = glob.glob('/dev/cu.usbmodem*') + glob.glob('/dev/tty.usbmodem*')
+    if ports:
+        MOTOR_PORT = ports[0]
+    elif os.path.exists('/dev/ttyACM0'):
+        MOTOR_PORT = '/dev/ttyACM0'
+    if MOTOR_PORT:
+        MOTORS_AVAILABLE = True
+        print(f"✓ Motor port: {MOTOR_PORT}")
+except ImportError as e:
+    print(f"⚠️ Motors not available: {e}")
+
+# RGB (requires Raspberry Pi)
+try:
     from lelamp.service.rgb.rgb_service import RGBService
-    HARDWARE_AVAILABLE = True
+    RGB_AVAILABLE = True
 except ImportError:
-    HARDWARE_AVAILABLE = False
-    print("⚠️ Hardware not available - running in simulation mode")
+    print("⚠️ RGB not available (Mac mode)")
+
+HARDWARE_AVAILABLE = MOTORS_AVAILABLE or RGB_AVAILABLE
 
 # Firestore Logger
 class FirestoreLogger:
@@ -129,27 +149,43 @@ class VoiceInput(BaseModel):
     audio: str  # base64 encoded audio
     format: str = "webm"
 
-# OpenAI client for voice processing
-from openai import OpenAI
-openai_client = OpenAI(
-    base_url="https://openrouter.ai/api/v1",
-    api_key=os.getenv("OPENROUTER_API_KEY")
-)
+# OpenAI client for voice processing (optional)
+try:
+    from openai import OpenAI
+    api_key = os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY")
+    if api_key:
+        openai_client = OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=api_key
+        )
+    else:
+        openai_client = None
+        print("⚠️ No OPENROUTER_API_KEY - chat disabled")
+except ImportError:
+    openai_client = None
 
 # Lifespan
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await logger.log_event("server_start", {"hardware": HARDWARE_AVAILABLE})
-    if HARDWARE_AVAILABLE:
+    await logger.log_event("server_start", {"motors": MOTORS_AVAILABLE, "rgb": RGB_AVAILABLE})
+    # Init motors (works on Mac via USB)
+    if MOTORS_AVAILABLE and MOTOR_PORT:
         try:
-            state.motors_service = MotorsService(port="/dev/ttyACM0", lamp_id="lelamp", fps=30)
-            state.rgb_service = RGBService(led_count=64, led_pin=12, led_freq_hz=800000, led_dma=10, led_brightness=255, led_invert=False, led_channel=0)
+            state.motors_service = DirectMotorsService(port=MOTOR_PORT, fps=30)
             state.motors_service.start()
+            recordings = state.motors_service.get_available_recordings()
+            print(f"✓ Motors: {len(recordings)} animations")
+        except Exception as e:
+            print(f"⚠️ Motors init failed: {e}")
+    # Init RGB (only on Raspberry Pi)
+    if RGB_AVAILABLE:
+        try:
+            state.rgb_service = RGBService(led_count=64, led_pin=12, led_freq_hz=800000, led_dma=10, led_brightness=255, led_invert=False, led_channel=0)
             state.rgb_service.start()
             state.rgb_service.dispatch("solid", (255, 255, 255))
-            print("✓ Hardware services started")
+            print("✓ RGB LEDs initialized")
         except Exception as e:
-            print(f"⚠️ Hardware init failed: {e}")
+            print(f"⚠️ RGB init failed: {e}")
     yield
     await logger.log_event("server_stop", {})
     if state.motors_service:
@@ -246,6 +282,8 @@ class ChatInput(BaseModel):
 
 @app.post("/api/chat")
 async def chat(chat_input: ChatInput):
+    if not openai_client:
+        return {"status": "error", "error": "Chat disabled - no API key configured"}
     try:
         response = openai_client.chat.completions.create(
             model="google/gemini-2.0-flash-exp",

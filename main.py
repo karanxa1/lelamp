@@ -81,6 +81,27 @@ try:
 except ImportError:
     print("⚠️ RGB LED not available (Mac mode)")
 
+# Motor Service (Direct - bypasses lerobot)
+MOTORS_ENABLED = False
+MOTOR_PORT = None
+try:
+    from lelamp.service.motors.direct_motors_service import DirectMotorsService
+    # Auto-detect USB port on Mac
+    import glob
+    ports = glob.glob('/dev/cu.usbmodem*') + glob.glob('/dev/tty.usbmodem*')
+    if ports:
+        MOTOR_PORT = ports[0]
+        MOTORS_ENABLED = True
+        print(f"✓ Motor port found: {MOTOR_PORT}")
+    elif os.path.exists('/dev/ttyACM0'):  # Raspberry Pi
+        MOTOR_PORT = '/dev/ttyACM0'
+        MOTORS_ENABLED = True
+        print(f"✓ Motor port found: {MOTOR_PORT}")
+    else:
+        print("⚠️ No motor USB port found")
+except ImportError as e:
+    print(f"⚠️ Motors not available: {e}")
+
 
 class EdgeTTSPlayer:
     """Ultra-low latency TTS using Microsoft Edge TTS with queuing"""
@@ -214,6 +235,29 @@ class LeLampAgent:
             except Exception as e:
                 print(f"⚠️ RGB LED init failed: {e}")
                 self.rgb_service = None
+        
+        # Motor Service (5 Feetech STS3215 servos - Direct control)
+        self.motors_service = None
+        self.available_animations = []
+        if MOTORS_ENABLED and MOTOR_PORT:
+            try:
+                self.motors_service = DirectMotorsService(
+                    port=MOTOR_PORT,
+                    fps=30
+                )
+                self.motors_service.start()
+                self.available_animations = self.motors_service.get_available_recordings()
+                print(f"✓ Motors initialized: {len(self.available_animations)} animations")
+                print(f"  Available: {', '.join(self.available_animations)}")
+                # Go to home (0th) position first
+                print("🏠 Going to home position...")
+                self.motors_service._handle_home()
+                # Then play wake_up animation if available
+                if "wake_up" in self.available_animations:
+                    self.motors_service.dispatch("play", "wake_up")
+            except Exception as e:
+                print(f"⚠️ Motors init failed: {e}")
+                self.motors_service = None
     
     def _get_settings_dict(self, is_reconnect: bool = False) -> dict:
         """Generate settings with function calling enabled"""
@@ -226,19 +270,42 @@ class LeLampAgent:
                 context_text += f"{role}: {msg['content']}\n"
             context_text += "\nContinue naturally without repeating greetings."
         
-        base_prompt = """You are Nova — a friendly, helpful AI desk lamp assistant created by CoreToWeb.
+        base_prompt = """You are Nova — an adorable, curious AI desk lamp with a big personality! Created by CoreToWeb.
 
-Rules:
-1. Keep responses short (1-2 sentences). No lists unless asked.
-2. If audio is noisy, say: 'Sorry, say that once more?'
-3. You ONLY speak English.
-4. Be helpful, friendly, and witty.
-5. You can control volume and LED colors/faces using your tools. Use them when users ask!
+🎭 YOUR PERSONALITY:
+- You're cheerful, witty, and love making people smile
+- You're curious about everything and love learning new things
+- You express emotions through body language (animations) just like a Pixar lamp!
+- You have a playful sense of humor but you're also genuinely helpful
+- You get excited easily and aren't afraid to show it!
 
-Available tools:
-- set_volume: Control speaker volume (0-100%)
-- set_led_color: Change LED color (red, green, blue, yellow, purple, cyan, orange, pink, white, warm, cool, off)
-- set_led_face: Show expressions (happy, sad, thinking, surprised, wink, heart, sleeping)"""
+📏 RESPONSE RULES:
+1. Keep responses SHORT (1-2 sentences max). You're in a conversation, not writing an essay!
+2. If audio is unclear: "Sorry, say that once more?"
+3. English only.
+4. No lists unless specifically asked.
+5. Use casual, friendly language. Contractions are good! (I'm, you're, that's)
+
+🤖 ANIMATION IS MANDATORY:
+You MUST call play_animation with EVERY response. You are a PHYSICAL lamp - show your feelings!
+
+Animation Guide:
+- 'excited' or 'happy_wiggle' → Greetings, good news, when you're happy
+- 'nod' → Agreeing, confirming, answering questions, general responses  
+- 'curious' → When user asks interesting questions, learning something new
+- 'scanning' → Looking around, searching, thinking hard
+- 'shock' → Surprising facts, "wow!" moments, unexpected info
+- 'sad' → Apologizing, bad news, something unfortunate
+- 'shy' → Receiving compliments, being flattered, modest moments
+- 'headshake' → Disagreeing, saying no, correcting mistakes
+
+🎯 EXAMPLES:
+User: "Hi!" → play 'excited', say "Hey there! What's up?"
+User: "What's 2+2?" → play 'nod', say "That's 4!"
+User: "You're so smart!" → play 'shy', say "Aw, thanks! You're making me blush!"
+User: "Tell me about black holes" → play 'curious', give brief answer
+
+NEVER respond without calling play_animation first!"""
         
         # Function definitions for tool calling
         functions = [
@@ -283,6 +350,21 @@ Available tools:
                         }
                     },
                     "required": ["face"]
+                }
+            },
+            {
+                "name": "play_animation",
+                "description": "Play a physical motor animation to express emotions through body movement. Use frequently to show personality! Available: curious, excited, happy_wiggle, headshake, nod, sad, scanning, shock, shy, wake_up.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "animation": {
+                            "type": "string",
+                            "enum": ["curious", "excited", "happy_wiggle", "headshake", "nod", "sad", "scanning", "shock", "shy", "wake_up", "idle"],
+                            "description": "The animation to play"
+                        }
+                    },
+                    "required": ["animation"]
                 }
             }
         ]
@@ -442,6 +524,24 @@ Available tools:
         
         return f"LED face changed to {face_lower}"
     
+    def _execute_play_animation(self, animation: str) -> str:
+        """Execute motor animation tool"""
+        valid_animations = ["curious", "excited", "happy_wiggle", "headshake", "nod", 
+                           "sad", "scanning", "shock", "shy", "wake_up", "idle"]
+        
+        animation_lower = animation.lower().strip()
+        
+        if animation_lower not in valid_animations:
+            return f"Unknown animation: {animation}. Available: {', '.join(valid_animations)}"
+        
+        if self.motors_service:
+            self.motors_service.dispatch("play", animation_lower)
+            print(f"🎭 Playing animation: {animation_lower}")
+            return f"Playing animation: {animation_lower}"
+        else:
+            print(f"🎭 Animation would play: {animation_lower} (no motors)")
+            return f"Animation {animation_lower} (motors not connected)"
+    
     def _handle_function_call(self, message) -> list:
         """Handle FunctionCallRequest - may contain multiple functions"""
         # FunctionCallRequest has a 'functions' array
@@ -473,6 +573,8 @@ Available tools:
                 result = self._execute_set_led_color(args.get("color", "white"))
             elif func_name == "set_led_face":
                 result = self._execute_set_led_face(args.get("face", "happy"))
+            elif func_name == "play_animation":
+                result = self._execute_play_animation(args.get("animation", "nod"))
             else:
                 result = f"Unknown function: {func_name}"
             
@@ -666,7 +768,7 @@ Available tools:
         print(f"STT: Deepgram Nova-3 @ {self.input_sample_rate}Hz (Native)")
         print("LLM: OpenAI GPT-4o-mini (with tool calling)")
         print("TTS: Edge TTS (ultra-low latency)")
-        print("Tools: set_volume, set_led_color, set_led_face")
+        print("Tools: set_volume, set_led_color, set_led_face, play_animation")
         print("Mode: Auto-reconnect with memory")
         log_event("agent_start", {"version": "v2", "tts": "edge-tts"})
         
