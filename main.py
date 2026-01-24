@@ -215,7 +215,7 @@ class LeLampAgent:
                 self.rgb_service = None
     
     def _get_settings_dict(self, is_reconnect: bool = False) -> dict:
-        """Generate settings - NO TTS from Deepgram, we use Edge TTS"""
+        """Generate settings with function calling enabled"""
         context_text = ""
         if is_reconnect and self.conversation_history:
             recent = self.conversation_history[-20:]
@@ -231,7 +231,60 @@ Rules:
 1. Keep responses short (1-2 sentences). No lists unless asked.
 2. If audio is noisy, say: 'Sorry, say that once more?'
 3. You ONLY speak English.
-4. Be helpful, friendly, and witty."""
+4. Be helpful, friendly, and witty.
+5. You can control volume and LED colors/faces using your tools. Use them when users ask!
+
+Available tools:
+- set_volume: Control speaker volume (0-100%)
+- set_led_color: Change LED color (red, green, blue, yellow, purple, cyan, orange, pink, white, warm, cool, off)
+- set_led_face: Show expressions (happy, sad, thinking, surprised, wink, heart, sleeping)"""
+        
+        # Function definitions for tool calling
+        functions = [
+            {
+                "name": "set_volume",
+                "description": "Control the speaker volume. Use when user asks to be louder, quieter, turn up/down, or set a specific volume level.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "volume_percent": {
+                            "type": "integer",
+                            "description": "Volume level from 0 to 100. 0=mute, 50=half, 100=maximum"
+                        }
+                    },
+                    "required": ["volume_percent"]
+                }
+            },
+            {
+                "name": "set_led_color",
+                "description": "Change the lamp's LED light color. Use for mood lighting, to express emotions, or when user asks to change color.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "color": {
+                            "type": "string",
+                            "description": "Color name: red, green, blue, yellow, purple, cyan, orange, pink, white, warm, cool, off. Or use rgb(r,g,b) format."
+                        }
+                    },
+                    "required": ["color"]
+                }
+            },
+            {
+                "name": "set_led_face",
+                "description": "Display a face expression on the LED matrix. Use to show emotions or reactions.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "face": {
+                            "type": "string",
+                            "enum": ["happy", "sad", "listening", "speaking", "thinking", "surprised", "wink", "heart", "sleeping", "idle"],
+                            "description": "The face expression to display"
+                        }
+                    },
+                    "required": ["face"]
+                }
+            }
+        ]
         
         settings = {
             "type": "Settings",
@@ -256,9 +309,10 @@ Rules:
                 "think": {
                     "provider": {
                         "type": "open_ai",
-                        "model": "gpt-5.1-chat-latest",
+                        "model": "gpt-4o-mini",
                     },
                     "prompt": base_prompt + context_text,
+                    "functions": functions,
                 },
                 # Still include speak config (Deepgram requires it)
                 # but we'll ignore the audio and use Edge TTS instead
@@ -275,6 +329,7 @@ Rules:
         # This avoids the delay from waiting for Deepgram TTS
         
         return settings
+
     
     def _on_tts_start(self):
         """Called when TTS playback starts"""
@@ -287,6 +342,122 @@ Rules:
         print("🎤 Mic re-enabled")
         if self.rgb_service:
             self.rgb_service.dispatch("paint", get_face("happy"))
+    
+    # ===== TOOL EXECUTION FUNCTIONS =====
+    
+    def _execute_set_volume(self, volume_percent: int) -> str:
+        """Execute volume control tool"""
+        try:
+            volume_percent = max(0, min(100, int(volume_percent)))
+            
+            if sys.platform == "darwin":
+                # Mac: use osascript
+                import subprocess
+                subprocess.run(
+                    ["osascript", "-e", f"set volume output volume {volume_percent}"],
+                    capture_output=True, timeout=5
+                )
+            else:
+                # Raspberry Pi: use amixer
+                import subprocess
+                subprocess.run(["amixer", "sset", "Master", f"{volume_percent}%"], capture_output=True, timeout=5)
+                subprocess.run(["amixer", "sset", "Line", f"{volume_percent}%"], capture_output=True, timeout=5)
+                subprocess.run(["amixer", "sset", "HP", f"{volume_percent}%"], capture_output=True, timeout=5)
+            
+            print(f"🔊 Volume set to {volume_percent}%")
+            return f"Volume set to {volume_percent}%"
+        except Exception as e:
+            print(f"⚠️ Volume error: {e}")
+            return f"Error setting volume: {e}"
+    
+    def _execute_set_led_color(self, color: str) -> str:
+        """Execute LED color change tool"""
+        color_map = {
+            "red": (255, 0, 0),
+            "green": (0, 255, 0),
+            "blue": (0, 0, 255),
+            "yellow": (255, 200, 0),
+            "purple": (150, 0, 255),
+            "cyan": (0, 255, 255),
+            "orange": (255, 100, 0),
+            "pink": (255, 100, 150),
+            "white": (255, 255, 255),
+            "warm": (255, 180, 100),
+            "cool": (200, 220, 255),
+            "off": (0, 0, 0),
+        }
+        
+        rgb = None
+        color_lower = color.lower().strip()
+        
+        # Check for rgb(r,g,b) format
+        if color_lower.startswith("rgb(") and color_lower.endswith(")"):
+            try:
+                values = color_lower[4:-1].split(",")
+                rgb = tuple(max(0, min(255, int(v.strip()))) for v in values)
+            except:
+                return f"Invalid RGB format: {color}"
+        elif color_lower in color_map:
+            rgb = color_map[color_lower]
+        else:
+            return f"Unknown color: {color}. Available: {', '.join(color_map.keys())}"
+        
+        if self.rgb_service:
+            # Create solid color pattern for all 64 LEDs
+            pattern = [rgb] * 64
+            self.rgb_service.dispatch("paint", pattern)
+            print(f"💡 LED color set to {color} {rgb}")
+        else:
+            print(f"💡 LED color would be {color} {rgb} (no hardware)")
+        
+        return f"LED color changed to {color}"
+    
+    def _execute_set_led_face(self, face: str) -> str:
+        """Execute LED face change tool"""
+        valid_faces = ["happy", "sad", "listening", "speaking", "thinking", 
+                       "surprised", "wink", "heart", "sleeping", "idle"]
+        
+        face_lower = face.lower().strip()
+        
+        if face_lower not in valid_faces:
+            return f"Unknown face: {face}. Available: {', '.join(valid_faces)}"
+        
+        if self.rgb_service:
+            self.rgb_service.dispatch("paint", get_face(face_lower))
+            print(f"😊 LED face set to {face_lower}")
+        else:
+            print(f"😊 LED face would be {face_lower} (no hardware)")
+        
+        return f"LED face changed to {face_lower}"
+    
+    def _handle_function_call(self, message) -> dict:
+        """Handle FunctionCallRequest and return response"""
+        func_name = getattr(message, "function_name", "") or message.get("function_name", "")
+        func_id = getattr(message, "function_call_id", "") or message.get("function_call_id", "")
+        
+        # Get input parameters
+        if hasattr(message, "input"):
+            args = message.input if isinstance(message.input, dict) else {}
+        else:
+            args = message.get("input", {})
+        
+        print(f"🔧 Tool call: {func_name}({args})")
+        
+        # Execute the appropriate function
+        if func_name == "set_volume":
+            result = self._execute_set_volume(args.get("volume_percent", 50))
+        elif func_name == "set_led_color":
+            result = self._execute_set_led_color(args.get("color", "white"))
+        elif func_name == "set_led_face":
+            result = self._execute_set_led_face(args.get("face", "happy"))
+        else:
+            result = f"Unknown function: {func_name}"
+        
+        return {
+            "type": "FunctionCallResponse",
+            "function_call_id": func_id,
+            "output": result
+        }
     
     def _handle_message(self, message):
         """Handle incoming WebSocket messages"""
@@ -346,6 +517,17 @@ Rules:
         
         elif msg_type == "Error":
             print(f"❌ Error: {getattr(message, 'description', 'Unknown')}")
+        
+        elif msg_type == "FunctionCallRequest":
+            # Handle tool/function calls
+            response = self._handle_function_call(message)
+            if self.connection:
+                try:
+                    self.connection._send(json.dumps(response))
+                    print(f"✓ Sent FunctionCallResponse")
+                except Exception as e:
+                    print(f"⚠️ Error sending function response: {e}")
+
     
     def _stream_audio(self):
         """Stream microphone audio to Deepgram"""
@@ -454,8 +636,9 @@ Rules:
         print("🪔 LeLamp Nova")
         print("=" * 50)
         print(f"STT: Deepgram Nova-3 @ {self.input_sample_rate}Hz (Native)")
-        print("LLM: OpenAI GPT-5.1")
+        print("LLM: OpenAI GPT-4o-mini (with tool calling)")
         print("TTS: Edge TTS (ultra-low latency)")
+        print("Tools: set_volume, set_led_color, set_led_face")
         print("Mode: Auto-reconnect with memory")
         log_event("agent_start", {"version": "v2", "tts": "edge-tts"})
         
