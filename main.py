@@ -88,13 +88,17 @@ try:
     from lelamp.service.motors.direct_motors_service import DirectMotorsService
     # Auto-detect USB port on Mac
     import glob
-    ports = glob.glob('/dev/cu.usbmodem*') + glob.glob('/dev/tty.usbmodem*')
-    if ports:
-        MOTOR_PORT = ports[0]
-        MOTORS_ENABLED = True
-        print(f"✓ Motor port found: {MOTOR_PORT}")
-    elif os.path.exists('/dev/ttyACM0'):  # Raspberry Pi
-        MOTOR_PORT = '/dev/ttyACM0'
+    import glob
+    # Search for common serial ports on Mac and Linux/Pi
+    potential_ports = (
+        glob.glob('/dev/cu.usbmodem*') + 
+        glob.glob('/dev/tty.usbmodem*') + 
+        glob.glob('/dev/ttyACM*') + 
+        glob.glob('/dev/ttyUSB*')
+    )
+    
+    if potential_ports:
+        MOTOR_PORT = potential_ports[0]
         MOTORS_ENABLED = True
         print(f"✓ Motor port found: {MOTOR_PORT}")
     else:
@@ -109,6 +113,9 @@ try:
     VISION_ENABLED = True
 except ImportError:
     print("⚠️ Vision dependencies not found")
+
+# Alarm Service
+from lelamp.service.alarm.alarm_service import AlarmService
 
 
 class EdgeTTSPlayer:
@@ -276,7 +283,12 @@ class LeLampAgent:
                 print("✓ Vision Service initialized (Wait for 'start_tracking' command)")
             except Exception as e:
                 print(f"⚠️ Vision init failed: {e}")
-    
+
+        # Alarm Service
+        self.alarm_service = AlarmService(on_trigger=self._on_alarm_trigger)
+        self.alarm_service.start()
+        print("✓ Alarm Service initialized")
+            
     def _get_settings_dict(self, is_reconnect: bool = False) -> dict:
         """Generate settings with function calling enabled"""
         context_text = ""
@@ -307,6 +319,7 @@ Current Date/Time: {current_time_str}
 3. English only.
 4. No lists unless specifically asked.
 5. Use casual, friendly language. Contractions are good! (I'm, you're, that's)
+6. NO EMOJIS. Do not use any emojis in your text response.
 
 🤖 ANIMATION IS MANDATORY:
 You MUST call play_animation with EVERY response. You are a PHYSICAL lamp - show your feelings!
@@ -417,6 +430,24 @@ NEVER respond without calling play_animation first!"""
                     "type": "object",
                     "properties": {}
                 }
+            },
+            {
+                "name": "set_alarm",
+                "description": "Set an alarm for a specific time. Use for reminders, wake up calls, or timers.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "time": {
+                            "type": "string",
+                            "description": "Time in HH:MM format (24-hour) or 'HH:MM AM/PM'. Example: '07:30', '14:00', '5:00 PM'."
+                        },
+                        "label": {
+                            "type": "string",
+                            "description": "Label for the alarm. Example: 'Morning Meeting', 'Wake Up', 'Dinner'."
+                        }
+                    },
+                    "required": ["time"]
+                }
             }
         ]
         
@@ -477,6 +508,27 @@ NEVER respond without calling play_animation first!"""
         if self.rgb_service:
             self.rgb_service.dispatch("paint", get_face("happy"))
     
+    def _on_alarm_trigger(self, label: str):
+        """Callback when alarm fires"""
+        print(f"⏰ ALARM TRIGGERED: {label}")
+        
+        # 1. Visual
+        if self.rgb_service:
+            self.rgb_service.dispatch("paint", get_face("surprised"))
+        if self.motors_service:
+            self.motors_service.dispatch("play", "excited") # Wake up movement
+            
+        # 2. Audio
+        # Queue text to TTS so standard playback logic (mute mic, LED face) applies
+        text = f"Alarm! It is time for {label}!"
+        
+        try:
+            self.tts.speak(text)
+        except Exception as e:
+            print(f"Alarm trigger error: {e}")
+
+    # ===== TOOL EXECUTION FUNCTIONS =====
+
     # ===== TOOL EXECUTION FUNCTIONS =====
     
     def _execute_set_volume(self, volume_percent: int) -> str:
@@ -617,6 +669,18 @@ NEVER respond without calling play_animation first!"""
         now_str = datetime.now().strftime("%I:%M %p on %A, %B %d, %Y")
         print(f"🕒 Time requested: {now_str}")
         return f"The current time is {now_str}"
+        
+    def _execute_set_alarm(self, time_str: str, label: str = "Alarm") -> str:
+        """Set a new alarm"""
+        if self.alarm_service:
+            success = self.alarm_service.add_alarm(time_str, label)
+            if success:
+                print(f"⏰ Alarm set for {time_str} ({label})")
+                return f"Alarm set for {time_str}."
+            else:
+                return f"Failed to set alarm for {time_str}. Please use HH:MM format."
+        else:
+            return "Alarm service not available."
     
     def _handle_function_call(self, message) -> list:
         """Handle FunctionCallRequest - may contain multiple functions"""
@@ -657,6 +721,8 @@ NEVER respond without calling play_animation first!"""
                 result = self._execute_stop_tracking()
             elif func_name == "get_current_time":
                 result = self._execute_get_time()
+            elif func_name == "set_alarm":
+                result = self._execute_set_alarm(args.get("time", ""), args.get("label", "Alarm"))
             else:
                 result = f"Unknown function: {func_name}"
             

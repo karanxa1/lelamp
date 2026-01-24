@@ -20,3 +20,7 @@ edge-tts>=6.1.9
 # Hardware dependencies (Raspberry Pi only)
 adafruit-circuitpython-neopixel
 rpi-ws281x
+
+# Vision dependencies
+mediapipe>=0.10.0
+opencv-python>=4.8.0
