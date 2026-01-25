@@ -18,10 +18,11 @@ soundfile>=0.13.1
 edge-tts>=6.1.9
 
 # Hardware dependencies (Raspberry Pi only)
-adafruit-circuitpython-neopixel
-rpi-ws281x
+# adafruit-circuitpython-neopixel
+# rpi-ws281x
 
-# Vision dependencies
-mediapipe>=0.10.0
-opencv-python-headless>=4.8.0
-protobuf>=3.20.0,<4.0.0
+mediapipe
+# opencv-python-headless
+# protobuf
+
+

@@ -16,7 +16,13 @@ class VisionService:
         self.thread = None
         
         # MediaPipe Setup (TFLite Backend)
-        self.mp_hands = mp.solutions.hands
+        try:
+            self.mp_hands = mp.solutions.hands
+        except AttributeError:
+            # Fallback for some installs
+            import mediapipe.python.solutions.hands
+            self.mp_hands = mp.solutions.hands
+            
         self.hands = self.mp_hands.Hands(
             static_image_mode=False,
             max_num_hands=1,
@@ -48,8 +54,20 @@ class VisionService:
         logger.info("Vision Service stopped")
         
     def _tracking_loop(self):
-        cap = cv2.VideoCapture(self.camera_index)
-        # Low res for performance on Pi
+        # Retry logic for camera connection
+        cap = None
+        for i in range(5):
+             cap = cv2.VideoCapture(self.camera_index)
+             if cap.isOpened():
+                 break
+             time.sleep(1)
+             
+        if not cap or not cap.isOpened():
+            logger.error("Could not open camera for vision service")
+            self.running = False
+            return
+
+        # Low res for performance on Pi (320x240 for 12-20 FPS)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
         
@@ -75,11 +93,41 @@ class VisionService:
                     y_norm = landmark.y
                     
                     # Check for Fist (Lock Gesture)
-                    # If Finger Tip (8) is below Finger PIP (6), it's curled
-                    if hand.landmark[8].y > hand.landmark[6].y:
-                        logger.info("Gesture: Fist detected (Locking)")
-                        # Could toggle lock here, but for now just log
+                    # Count fingers: Check if fingertips are below PIP joints
+                    fingers_closed = 0
+                    # Index (8 vs 6)
+                    if hand.landmark[8].y > hand.landmark[6].y: fingers_closed += 1
+                    # Middle (12 vs 10)
+                    if hand.landmark[12].y > hand.landmark[10].y: fingers_closed += 1
+                    # Ring (16 vs 14)
+                    if hand.landmark[16].y > hand.landmark[14].y: fingers_closed += 1
+                    # Pinky (20 vs 18)
+                    if hand.landmark[20].y > hand.landmark[18].y: fingers_closed += 1
                     
+                    # If 3 or more fingers closed -> Fist detected
+                    if fingers_closed >= 3:
+                        if not hasattr(self, '_fist_hold_start'):
+                            self._fist_hold_start = time.time()
+                        elif time.time() - self._fist_hold_start > 1.0: # Hold for 1 second
+                             # Toggle Lock
+                             self.locked = not self.locked
+                             state = "LOCKED" if self.locked else "UNLOCKED"
+                             logger.info(f"🔒 Gesture: Fist held -> Tracking {state}")
+                             
+                             # Visual feedback via Motors (Video game "rumble" style or nod)
+                             if self.motor_service:
+                                 self.motor_service.dispatch("play", "nod")
+                                 
+                             # Reset hold time to prevent rapid toggling
+                             self._fist_hold_start = time.time() + 2.0 
+                    else:
+                        self._fist_hold_start = None
+
+                    # If locked, skip motor updates
+                    if self.locked:
+                        time.sleep(0.05)
+                        continue
+
                     # Motor Mapping
                     # X: 0.0(Left) -> 1.0(Right). Motors: -ve -> +ve
                     # Yaw: Map 0.0-1.0 to -50deg to +50deg

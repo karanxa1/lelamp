@@ -106,13 +106,13 @@ echo "Step 3: Configuring ALSA..."
 configure_alsa "$MIC_CARD" "$SPEAKER_CARD"
 
 echo ""
-echo "Step 4: Testing audio devices..."
-# Quick test that devices are accessible
-if arecord -D "plughw:${MIC_CARD},0" -d 1 -f S16_LE -r 16000 /dev/null 2>/dev/null; then
-    echo "✓ Microphone test passed"
-else
-    echo "⚠ Microphone test failed (may still work with rate conversion)"
-fi
+# Step 4: Testing audio devices...
+# Skipped for faster startup
+# if arecord -D "plughw:${MIC_CARD},0" -d 1 -f S16_LE -r 16000 /dev/null 2>/dev/null; then
+#     echo "✓ Microphone test passed"
+# else
+#     echo "⚠ Microphone test failed (may still work with rate conversion)"
+# fi
 
 echo ""
 echo "Step 5: Starting LeLamp agent..."

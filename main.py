@@ -28,23 +28,36 @@ load_dotenv()
 
 print("✓ Loaded environment variables", flush=True)
 
-# Firebase Admin SDK
+# Libraries are lazy-loaded in LeLampAgent to speed up startup
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-print("✓ Imported Firebase modules", flush=True)
 
-if not firebase_admin._apps:
-    print("✓ Initializing Firebase...", flush=True)
-    cred = credentials.Certificate("firebase-credentials.json")
-    firebase_admin.initialize_app(cred)
-    print("✓ Firebase initialized", flush=True)
-db = firestore.client()
-print("✓ Firestore client ready", flush=True)
 
+# Global DB reference (initialized lazily)
+db = None
+
+def init_firebase():
+    """Initialize Firebase in background"""
+    global db
+    if not firebase_admin._apps:
+        try:
+            cred = credentials.Certificate("firebase-credentials.json")
+            firebase_admin.initialize_app(cred)
+            print("✓ Firebase initialized", flush=True)
+        except Exception as e:
+            print(f"⚠️ Firebase init failed: {e}")
+            return
+            
+    try:
+        db = firestore.client()
+        print("✓ Firestore client ready", flush=True)
+    except Exception as e:
+         print(f"⚠️ Firestore init failed: {e}")
 
 def log_conversation(user_input: str, ai_response: str):
     """Log conversation to Firestore"""
+    if not db: return
     try:
         db.collection("conversations").add({
             "timestamp": datetime.now(timezone.utc),
@@ -54,13 +67,13 @@ def log_conversation(user_input: str, ai_response: str):
             "device": "lelamp",
             "source": "deepgram_edge_tts"
         })
-        print("✓ Logged")
     except Exception as e:
         print(f"Firestore error: {e}")
 
 
 def log_event(event_type: str, data: dict):
     """Log event to Firestore"""
+    if not db: return
     try:
         db.collection("events").add({
             "timestamp": datetime.now(timezone.utc),
@@ -88,7 +101,6 @@ try:
     from lelamp.service.motors.direct_motors_service import DirectMotorsService
     # Auto-detect USB port on Mac
     import glob
-    import glob
     # Search for common serial ports on Mac and Linux/Pi
     potential_ports = (
         glob.glob('/dev/cu.usbmodem*') + 
@@ -114,6 +126,8 @@ try:
     VISION_ENABLED = True
 except ImportError:
     print("⚠️ Vision dependencies not found")
+
+
 
 # Alarm Service
 from lelamp.service.alarm.alarm_service import AlarmService
@@ -246,8 +260,28 @@ class LeLampAgent:
             on_stop=self._on_tts_stop
         )
         
-        # RGB LED
+        
+        # Services (initialized in background)
         self.rgb_service = None
+        self.motors_service = None
+        self.vision_service = None
+        self.available_animations = []
+        
+        # Start background initialization
+        threading.Thread(target=self._init_services, daemon=True).start()
+
+        # Alarm Service - Fast enough to init here
+        self.alarm_service = AlarmService(on_trigger=self._on_alarm_trigger)
+        self.alarm_service.start()
+        print("✓ Alarm Service initialized")
+            
+    def _init_services(self):
+        """Initialize hardware services in parallel/background to speed up startup"""
+        
+        # 1. Firebase (Background)
+        init_firebase()
+        
+        # 2. RGB LED (Background)
         if RGB_ENABLED:
             try:
                 self.rgb_service = RGBService(
@@ -255,18 +289,21 @@ class LeLampAgent:
                     led_dma=10, led_brightness=255, led_invert=False, led_channel=0
                 )
                 self.rgb_service.start()
-                for pattern, duration in get_wake_animation():
-                    self.rgb_service.dispatch("paint", pattern)
-                    time.sleep(duration)
-                self.rgb_service.dispatch("paint", get_face("happy"))
+                # Run startup animation in its own thread to not block
+                def _run_wake_anim():
+                    for pattern, duration in get_wake_animation():
+                        if self.rgb_service: self.rgb_service.dispatch("paint", pattern)
+                        time.sleep(duration)
+                    if self.rgb_service: self.rgb_service.dispatch("paint", get_face("happy"))
+                
+                threading.Thread(target=_run_wake_anim, daemon=True).start()
                 print("✓ RGB LED initialized")
             except Exception as e:
                 print(f"⚠️ RGB LED init failed: {e}")
                 self.rgb_service = None
         
-        # Motor Service (5 Feetech STS3215 servos - Direct control)
-        self.motors_service = None
-        self.available_animations = []
+        # 3. Motors (Background)
+        # Use simple global variable or check imported MOTORS_ENABLED
         if MOTORS_ENABLED and MOTOR_PORT:
             try:
                 self.motors_service = DirectMotorsService(
@@ -276,10 +313,11 @@ class LeLampAgent:
                 self.motors_service.start()
                 self.available_animations = self.motors_service.get_available_recordings()
                 print(f"✓ Motors initialized: {len(self.available_animations)} animations")
-                print(f"  Available: {', '.join(self.available_animations)}")
+                
                 # Go to home (0th) position first
                 print("🏠 Going to home position...")
                 self.motors_service._handle_home()
+                
                 # Then play wake_up animation if available
                 if "wake_up" in self.available_animations:
                     self.motors_service.dispatch("play", "wake_up")
@@ -287,20 +325,16 @@ class LeLampAgent:
                 print(f"⚠️ Motors init failed: {e}")
                 self.motors_service = None
                 
-        # Vision Service (Hand Tracking)
-        self.vision_service = None
+        # 4. Vision (Depends on Motors)
         if VISION_ENABLED:
             try:
                 # Share the motor service with vision service (can be None)
+                # Wait a bit for motors if they are enabled but not ready? 
+                # For now just pass what we have (might be None if motors failed or still initing - but we are in same thread)
                 self.vision_service = VisionService(motor_service=self.motors_service)
                 print("✓ Vision Service initialized (Wait for 'start_tracking' command)")
             except Exception as e:
                 print(f"⚠️ Vision init failed: {e}")
-
-        # Alarm Service
-        self.alarm_service = AlarmService(on_trigger=self._on_alarm_trigger)
-        self.alarm_service.start()
-        print("✓ Alarm Service initialized")
             
     def _get_settings_dict(self, is_reconnect: bool = False) -> dict:
         """Generate settings with function calling enabled"""
@@ -351,6 +385,8 @@ Animation Guide:
 - You have a camera! If user asks to "follow my hand", "track me", or "hand mode" -> Call start_hand_tracking.
 - Explain: "Okay! Show me your hand and I'll follow it. Close your fist to lock/pause."
 - If user says "stop following" -> Call stop_hand_tracking.
+
+
 
 🎯 EXAMPLES:
 User: "Hi!" → play 'excited', say "Hey there! What's up?"
@@ -675,6 +711,8 @@ NEVER respond without calling play_animation first!"""
             return "Hand tracking stopped. I returned to normal mode."
         else:
             return "Tracking was not active."
+    
+
             
     def _execute_get_time(self) -> str:
         """Get current time"""
@@ -732,6 +770,7 @@ NEVER respond without calling play_animation first!"""
                 result = self._execute_start_tracking()
             elif func_name == "stop_hand_tracking":
                 result = self._execute_stop_tracking()
+
             elif func_name == "get_current_time":
                 result = self._execute_get_time()
             elif func_name == "set_alarm":
@@ -815,7 +854,7 @@ NEVER respond without calling play_animation first!"""
                 for response in responses:
                     try:
                         self.connection._send(json.dumps(response))
-                        print(f"✓ Sent FunctionCallResponse for {response.get('function_call_id', 'unknown')}")
+                        print(f"✓ Sent FunctionCallResponse for {response.get('id', 'unknown')}")
                     except Exception as e:
                         print(f"⚠️ Error sending function response: {e}")
 
