@@ -1,10 +1,15 @@
 """Vision Service - MediaPipe TFLite Hand Tracking"""
 
 import cv2
-import mediapipe as mp
 import time
 import threading
 import logging
+
+# Try standard mediapipe first, fallback to mediapipe-rpi4
+try:
+    import mediapipe as mp
+except (ImportError, ModuleNotFoundError):
+    import mediapipe_rpi4 as mp
 
 logger = logging.getLogger(__name__)
 
@@ -16,28 +21,13 @@ class VisionService:
         self.thread = None
         
         # MediaPipe Setup (TFLite Backend)
-        try:
-            self.mp_hands = mp.solutions.hands
-            self.hands = self.mp_hands.Hands(
-                static_image_mode=False,
-                max_num_hands=1,
-                min_detection_confidence=0.5,
-                min_tracking_confidence=0.5
-            )
-        except (AttributeError, ModuleNotFoundError):
-            # Fallback for mediapipe-rpi4
-            try:
-                import mediapipe_rpi4 as mp_rpi
-                self.mp_hands = mp_rpi.solutions.hands
-                self.hands = self.mp_hands.Hands(
-                    static_image_mode=False,
-                    max_num_hands=1,
-                    min_detection_confidence=0.5,
-                    min_tracking_confidence=0.5
-                )
-            except Exception as e:
-                logger.error(f"Failed to initialize MediaPipe: {e}")
-                raise
+        self.mp_hands = mp.solutions.hands
+        self.hands = self.mp_hands.Hands(
+            static_image_mode=False,
+            max_num_hands=1,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5
+        )
         
         # Tracking State
         self.smooth_yaw = 0.0
