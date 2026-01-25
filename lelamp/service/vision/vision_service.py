@@ -5,17 +5,25 @@ import time
 import threading
 import logging
 import numpy as np
+import sys
+import os
 
 logger = logging.getLogger(__name__)
 
 class VisionService:
     """Tracks blue colored objects using OpenCV HSV color detection"""
     
-    def __init__(self, motor_service=None, camera_index=0):
+    def __init__(self, motor_service=None, camera_index=0, show_preview=None):
         self.motor_service = motor_service
         self.camera_index = camera_index
         self.running = False
         self.thread = None
+        
+        # Auto-detect preview: show on Mac, hide on Pi (headless)
+        if show_preview is None:
+            self.show_preview = sys.platform == "darwin"
+        else:
+            self.show_preview = show_preview
         
         # HSV range for blue color detection (adjust if needed)
         # Blue range: H=100-130, S=100-255, V=50-255
@@ -45,12 +53,16 @@ class VisionService:
             self.motor_service._is_animating = True
         logger.info("Vision Service started (Blue Color Tracking)")
         print("🔵 Blue color tracking started")
+        if self.show_preview:
+            print("👁️ Preview window enabled - press 'q' to close preview")
         
     def stop(self):
         self.running = False
         if self.thread: self.thread.join(timeout=1.0)
         if self.motor_service:
             self.motor_service._is_animating = False
+        if self.show_preview:
+            cv2.destroyAllWindows()
         logger.info("Vision Service stopped")
         print("🔵 Blue color tracking stopped")
         
@@ -86,6 +98,7 @@ class VisionService:
                 continue
             
             frame_count += 1
+            display_frame = frame.copy() if self.show_preview else None
             
             try:
                 # Convert to HSV color space
@@ -113,6 +126,13 @@ class VisionService:
                         center_x = x + w // 2
                         center_y = y + h // 2
                         
+                        # Draw on preview
+                        if self.show_preview and display_frame is not None:
+                            cv2.rectangle(display_frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
+                            cv2.circle(display_frame, (center_x, center_y), 8, (0, 0, 255), -1)
+                            cv2.putText(display_frame, f"Blue: {area:.0f}px", (x, y-10), 
+                                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                        
                         # Normalize to 0.0 - 1.0
                         x_norm = center_x / self.frame_width
                         y_norm = center_y / self.frame_height
@@ -138,6 +158,23 @@ class VisionService:
                         
                         if frame_count % 15 == 0:
                             print(f"🎯 Motor: yaw={self.smooth_yaw:.1f}, pitch={self.smooth_pitch:.1f}")
+                
+                # Show preview window on Mac
+                if self.show_preview and display_frame is not None:
+                    # Add status text
+                    cv2.putText(display_frame, "Blue Color Tracking", (10, 25), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                    cv2.putText(display_frame, f"Yaw: {self.smooth_yaw:.1f} Pitch: {self.smooth_pitch:.1f}", 
+                               (10, 55), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+                    
+                    cv2.imshow("Blue Tracking Preview", display_frame)
+                    cv2.imshow("Blue Mask", mask)
+                    
+                    # Check for 'q' key to close preview
+                    if cv2.waitKey(1) & 0xFF == ord('q'):
+                        self.show_preview = False
+                        cv2.destroyAllWindows()
+                        print("👁️ Preview closed")
                     
             except Exception as e:
                 logger.error(f"Color tracking error: {e}")
@@ -147,6 +184,8 @@ class VisionService:
             time.sleep(0.02)  # ~50 FPS
             
         cap.release()
+        if self.show_preview:
+            cv2.destroyAllWindows()
         
     def _update_motors(self, yaw_deg, pitch_deg):
         if not self.motor_service:
