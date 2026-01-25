@@ -23,12 +23,21 @@ pip install "protobuf==3.20.3"
 pip install "mediapipe==0.10.9"
 
 # 4. Install other deps manually to avoid conflict
+# 4. Install other deps manually to avoid conflict
+# Use quotes for versions with < or >
 pip install \
-    deepgram-sdk>=3.0.0 \
-    edge-tts>=6.1.9 \
-    sounddevice>=0.5.2 \
-    firebase-admin>=6.0.0 \
+    "deepgram-sdk>=3.0.0" \
+    "edge-tts>=6.1.9" \
+    "sounddevice>=0.5.2" \
+    "firebase-admin>=6.0.0" \
+    "numpy<2.0.0" \
+    "feetech-servo-sdk>=1.0.0" \
+    "rpi-ws281x" \
+    "adafruit-circuitpython-neopixel" \
+    "pyaudio>=0.2.14" \
     pyserial \
-    numpy<2.0.0
+    requests \
+    python-dotenv \
+    soundfile
 
 echo "✅ Vision Environment Ready at .venv_vision"
