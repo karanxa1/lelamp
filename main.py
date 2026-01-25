@@ -118,12 +118,12 @@ try:
 except ImportError as e:
     print(f"⚠️ Motors not available: {e}")
 
-# Vision Service (Hand Tracking) - Works on Mac and Raspberry Pi with Python 3.9
+# Vision Service (Blue Color Tracking) - Works on any system with OpenCV
 VISION_ENABLED = False
 try:
     from lelamp.service.vision.vision_service import VisionService
     VISION_ENABLED = True
-    print("✓ Vision Service available")
+    print("✓ Vision Service available (Blue Color Tracking)")
 except ImportError as e:
     print(f"⚠️ Vision dependencies not found: {e}")
 
