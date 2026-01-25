@@ -9,6 +9,7 @@ sudo apt-get update
 sudo apt-get install -y \
     python3-dev \
     python3-venv \
+    python3-full \
     python3-pip \
     ffmpeg \
     libsm6 \
@@ -19,17 +20,16 @@ sudo apt-get install -y \
 
 # 2. Python Environment
 echo "🐍 Setting up Python environment..."
-if [ ! -d ".venv" ]; then
-    python3 -m venv .venv
+# Remove old venv if it exists to ensure clean state
+if [ -d ".venv" ]; then
+    rm -rf .venv
 fi
-source .venv/bin/activate
+python3 -m venv .venv --system-site-packages
 
 echo "⬇️ Installing Python packages..."
-# Ensure pip is up to date
-pip install --upgrade pip
-
-# Install requirements
-pip install -r requirements.txt
+# Use strict path to venv pip
+./.venv/bin/pip install --upgrade pip
+./.venv/bin/pip install -r requirements.txt
 
 # 3. Hardware Permissions (Motors)
 echo "🔌 Configuring USB permissions..."
