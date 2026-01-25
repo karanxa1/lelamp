@@ -5,16 +5,19 @@ import time
 import threading
 import logging
 
-# Try standard mediapipe first, fallback to mediapipe-rpi4
+# Try standard mediapipe first (works with both regular and mediapipe-rpi4)
 try:
     import mediapipe as mp
-except (ImportError, ModuleNotFoundError):
-    import mediapipe_rpi4 as mp
+except ImportError:
+    mp = None
 
 logger = logging.getLogger(__name__)
 
 class VisionService:
     def __init__(self, motor_service=None, camera_index=0):
+        if mp is None:
+            raise ImportError("MediaPipe not available")
+            
         self.motor_service = motor_service
         self.camera_index = camera_index
         self.running = False
