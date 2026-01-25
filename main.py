@@ -667,12 +667,17 @@ NEVER respond without calling play_animation first!"""
                         summary.append(f"{i+1}. {item.get('title')}: {item.get('snippet')}")
                         
                 if not summary:
+                    print("⚠️ Search return: No results")
                     return "No good search results found."
-                    
-                return "\\n".join(summary)
+                
+                result_text = "\n".join(summary)
+                print(f"✅ Search return ({len(summary)} items):\n{result_text[:200]}...") # Print first 200 chars
+                return result_text
             else:
+                print(f"❌ Search failed: {response.status_code}")
                 return f"Search failed with status code: {response.status_code}"
         except Exception as e:
+            print(f"❌ Search exception: {e}")
             return f"Search error: {e}"
             
             print(f"🔊 Volume {change}")
