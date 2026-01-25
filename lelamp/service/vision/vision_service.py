@@ -22,8 +22,8 @@ class VisionService:
         self.blue_lower = np.array([100, 100, 50])
         self.blue_upper = np.array([130, 255, 255])
         
-        # Minimum contour area (filters out noise)
-        self.min_contour_area = 500
+        # Minimum contour area (filters out noise - needs significant blue object)
+        self.min_contour_area = 5000
         
         # Tracking State
         self.smooth_yaw = 0.0
