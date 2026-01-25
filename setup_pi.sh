@@ -22,7 +22,8 @@ sudo apt-get install -y \
 echo "🐍 Setting up Python environment..."
 # Remove old venv if it exists to ensure clean state
 if [ -d ".venv" ]; then
-    rm -rf .venv
+    echo "🗑️ Removing old environment..."
+    sudo rm -rf .venv
 fi
 python3 -m venv .venv --system-site-packages
 
