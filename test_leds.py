@@ -10,6 +10,9 @@ def test_pattern():
         print("Failed to initialize serial port. Check connections and permissions.")
         return
 
+    service.start()
+    time.sleep(1) # Allow thread to start
+
     print("Sending SOLID RED...")
     service.dispatch("solid", (255, 0, 0))
     time.sleep(1)
