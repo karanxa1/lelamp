@@ -20,10 +20,10 @@ class VisionService:
         self.smooth_pitch = 0.0
         self.alpha = 0.2
         
-        # Skin color range (YCrCb color space is better for skin)
-        # These values work for many skin tones but may need tuning
-        self.min_YCrCb = np.array([0, 133, 77], np.uint8)
-        self.max_YCrCb = np.array([235, 173, 127], np.uint8)
+        # Orange color range (HSV is better for colors)
+        # Hue: 0-180 in OpenCV. Orange is roughly 10-25
+        self.min_HSV = np.array([5, 100, 100], np.uint8)
+        self.max_HSV = np.array([25, 255, 255], np.uint8)
 
     def start(self):
         """Start tracking thread"""
@@ -34,7 +34,7 @@ class VisionService:
         
         if self.motor_service:
             self.motor_service._is_animating = True
-        logger.info("Vision Service started (Color Tracking Mode)")
+        logger.info("Vision Service started (Color Tracking Mode: ORANGE)")
 
     def stop(self):
         self.running = False
@@ -57,11 +57,11 @@ class VisionService:
             img = cv2.flip(img, 1)
             img = cv2.GaussianBlur(img, (5, 5), 0)
             
-            # Convert to YCrCb
-            ycrcb = cv2.cvtColor(img, cv2.COLOR_BGR2YCrCb)
+            # Convert to HSV
+            hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
             
             # Create Mask
-            mask = cv2.inRange(ycrcb, self.min_YCrCb, self.max_YCrCb)
+            mask = cv2.inRange(hsv, self.min_HSV, self.max_HSV)
             
             # Clean up mask
             kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
