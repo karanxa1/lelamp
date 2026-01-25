@@ -1,6 +1,6 @@
 #include <Adafruit_NeoPixel.h>
 
-#define PIN        A1
+#define PIN        3
 #define NUMPIXELS  64
 #define BAUDRATE   115200
 
