@@ -93,6 +93,7 @@ class VisionService:
                     landmark = hand.landmark[8]
                     x_norm = landmark.x
                     y_norm = landmark.y
+                    print(f"✋ Hand detected: x={x_norm:.2f}, y={y_norm:.2f}")
                     
                     # Check for Fist (Lock Gesture)
                     # Count fingers: Check if fingertips are below PIP joints
@@ -139,6 +140,7 @@ class VisionService:
                     self.smooth_pitch = (self.smooth_pitch * (1-self.alpha)) + (raw_pitch * self.alpha)
                     
                     self._update_motors(self.smooth_yaw, self.smooth_pitch)
+                    print(f"🎯 Motor update: yaw={self.smooth_yaw:.1f}, pitch={self.smooth_pitch:.1f}")
                     
             except Exception as e:
                 logger.error(f"MediaPipe error: {e}")
