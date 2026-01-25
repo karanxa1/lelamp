@@ -249,7 +249,7 @@ class LeLampAgent:
         self.current_volume = 50  # Track current volume for increase/decrease
         
         # 16kHz is optimal for speech STT (faster processing)
-        self.input_sample_rate = 16000
+        self.input_sample_rate = 48000  # USB mic supports 48000Hz
         self.output_sample_rate = 24000
         
         # Edge TTS for fast voice output
