@@ -1,45 +1,47 @@
-"""Vision Service - Blue Color Object Tracking"""
+"""Vision Service - MediaPipe Hand Tracking"""
 
 import cv2
 import time
 import threading
 import logging
-import numpy as np
-import sys
-import os
+
+# Try standard mediapipe first (works with both regular and mediapipe-rpi4)
+try:
+    import mediapipe as mp
+    MEDIAPIPE_AVAILABLE = True
+except ImportError:
+    mp = None
+    MEDIAPIPE_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
 class VisionService:
-    """Tracks blue colored objects using OpenCV HSV color detection"""
+    """Tracks hand using MediaPipe hand detection"""
     
-    def __init__(self, motor_service=None, camera_index=0, show_preview=None):
+    def __init__(self, motor_service=None, camera_index=0):
+        if not MEDIAPIPE_AVAILABLE:
+            raise ImportError("MediaPipe not available")
+            
         self.motor_service = motor_service
         self.camera_index = camera_index
         self.running = False
         self.thread = None
         
-        # Auto-detect preview: DISABLED for now (imshow crashes from background thread)
-        # To enable preview, run test_vision.py instead
-        self.show_preview = False
-        
-        # HSV range for blue color detection (adjust if needed)
-        # Blue range: H=100-130, S=100-255, V=50-255
-        self.blue_lower = np.array([100, 100, 50])
-        self.blue_upper = np.array([130, 255, 255])
-        
-        # Minimum contour area (filters out noise - needs significant blue object)
-        self.min_contour_area = 5000
+        # MediaPipe Setup
+        self.mp_hands = mp.solutions.hands
+        self.mp_drawing = mp.solutions.drawing_utils
+        self.hands = self.mp_hands.Hands(
+            static_image_mode=False,
+            max_num_hands=1,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5
+        )
         
         # Tracking State
         self.smooth_yaw = 0.0
         self.smooth_pitch = 0.0
-        self.alpha = 0.15  # Smoothing factor (lower = smoother movement)
-        self.deadzone = 3.0  # Ignore small movements (degrees)
-        
-        # Frame dimensions (set when camera opens)
-        self.frame_width = 640
-        self.frame_height = 480
+        self.alpha = 0.2  # Smooth factor
+        self.locked = False
         
     def start(self):
         if self.running: return
@@ -49,147 +51,106 @@ class VisionService:
         
         if self.motor_service:
             self.motor_service._is_animating = True
-        logger.info("Vision Service started (Blue Color Tracking)")
-        print("🔵 Blue color tracking started")
-        if self.show_preview:
-            print("👁️ Preview window enabled - press 'q' to close preview")
+        logger.info("Vision Service started (MediaPipe Hand Tracking)")
         
     def stop(self):
         self.running = False
         if self.thread: self.thread.join(timeout=1.0)
         if self.motor_service:
             self.motor_service._is_animating = False
-        if self.show_preview:
-            cv2.destroyAllWindows()
         logger.info("Vision Service stopped")
-        print("🔵 Blue color tracking stopped")
         
     def _tracking_loop(self):
         # Retry logic for camera connection
         cap = None
         for i in range(5):
-            cap = cv2.VideoCapture(self.camera_index)
-            if cap.isOpened():
-                break
-            time.sleep(1)
+             cap = cv2.VideoCapture(self.camera_index)
+             if cap.isOpened():
+                 break
+             time.sleep(1)
              
         if not cap or not cap.isOpened():
             logger.error("Could not open camera for vision service")
-            print("❌ Could not open camera")
             self.running = False
             return
 
-        # Set camera resolution
+        # Standard resolution for better field of view
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         
-        # Get actual dimensions
-        self.frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        self.frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        print(f"📷 Camera opened: {self.frame_width}x{self.frame_height}")
+        print("📷 Camera opened for hand tracking")
         
-        frame_count = 0
         while self.running:
-            success, frame = cap.read()
+            success, img = cap.read()
             if not success:
                 time.sleep(0.1)
                 continue
-            
-            frame_count += 1
-            display_frame = frame.copy() if self.show_preview else None
+                
+            # Flip for mirror effect
+            img = cv2.flip(img, 1)
+            img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
             
             try:
-                # Convert to HSV color space
-                hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+                results = self.hands.process(img_rgb)
                 
-                # Create mask for blue color
-                mask = cv2.inRange(hsv, self.blue_lower, self.blue_upper)
-                
-                # Apply morphological operations to clean up the mask
-                kernel = np.ones((5, 5), np.uint8)
-                mask = cv2.erode(mask, kernel, iterations=1)
-                mask = cv2.dilate(mask, kernel, iterations=2)
-                
-                # Find contours
-                contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                
-                if contours:
-                    # Find the largest blue contour
-                    largest_contour = max(contours, key=cv2.contourArea)
-                    area = cv2.contourArea(largest_contour)
+                if results.multi_hand_landmarks:
+                    # Get first hand
+                    hand = results.multi_hand_landmarks[0]
                     
-                    if area > self.min_contour_area:
-                        # Get bounding box and center
-                        x, y, w, h = cv2.boundingRect(largest_contour)
-                        center_x = x + w // 2
-                        center_y = y + h // 2
-                        
-                        # Draw on preview
-                        if self.show_preview and display_frame is not None:
-                            cv2.rectangle(display_frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
-                            cv2.circle(display_frame, (center_x, center_y), 8, (0, 0, 255), -1)
-                            cv2.putText(display_frame, f"Blue: {area:.0f}px", (x, y-10), 
-                                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-                        
-                        # Normalize to 0.0 - 1.0
-                        x_norm = center_x / self.frame_width
-                        y_norm = center_y / self.frame_height
-                        
-                        # Print detection every 10 frames to reduce spam
-                        if frame_count % 10 == 0:
-                            print(f"🔵 Blue detected: x={x_norm:.2f}, y={y_norm:.2f}, area={area:.0f}")
-                        
-                        # Motor Mapping (reduced range for smoother control)
-                        # X: 0.0(Left) -> 1.0(Right)
-                        raw_yaw = (x_norm - 0.5) * 80  # Reduced from 120
-                        
-                        # Pitch: Map 0.0(Top) -> 1.0(Bottom)
-                        raw_pitch = (0.5 - y_norm) * 50  # Reduced from 80
-                        
-                        # Smoothing with exponential moving average
-                        self.smooth_yaw = (self.smooth_yaw * (1-self.alpha)) + (raw_yaw * self.alpha)
-                        self.smooth_pitch = (self.smooth_pitch * (1-self.alpha)) + (raw_pitch * self.alpha)
-                        
-                        # Only update motors if movement is significant (deadzone)
-                        if abs(self.smooth_yaw) > self.deadzone or abs(self.smooth_pitch) > self.deadzone:
-                            self._update_motors(self.smooth_yaw, self.smooth_pitch)
-                        
-                        if frame_count % 15 == 0:
-                            print(f"🎯 Motor: yaw={self.smooth_yaw:.1f}, pitch={self.smooth_pitch:.1f}")
-                
-                # Show preview window on Mac
-                if self.show_preview and display_frame is not None:
-                    # Add status text
-                    cv2.putText(display_frame, "Blue Color Tracking", (10, 25), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-                    cv2.putText(display_frame, f"Yaw: {self.smooth_yaw:.1f} Pitch: {self.smooth_pitch:.1f}", 
-                               (10, 55), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
+                    # Track Index Finger Tip (Landmark 8)
+                    landmark = hand.landmark[8]
+                    x_norm = landmark.x
+                    y_norm = landmark.y
+                    print(f"✋ Hand detected: x={x_norm:.2f}, y={y_norm:.2f}")
                     
-                    cv2.imshow("Blue Tracking Preview", display_frame)
-                    cv2.imshow("Blue Mask", mask)
+                    # Check for Fist (Lock Gesture)
+                    fingers_closed = 0
+                    if hand.landmark[8].y > hand.landmark[6].y: fingers_closed += 1
+                    if hand.landmark[12].y > hand.landmark[10].y: fingers_closed += 1
+                    if hand.landmark[16].y > hand.landmark[14].y: fingers_closed += 1
+                    if hand.landmark[20].y > hand.landmark[18].y: fingers_closed += 1
                     
-                    # Check for 'q' key to close preview
-                    if cv2.waitKey(1) & 0xFF == ord('q'):
-                        self.show_preview = False
-                        cv2.destroyAllWindows()
-                        print("👁️ Preview closed")
+                    print(f"👆 Fingers closed: {fingers_closed}/4, locked={self.locked}")
+                    
+                    # Gesture detection
+                    if fingers_closed >= 3:
+                        if not self.locked:
+                            self.locked = True
+                            print("🔒 Fist detected: Pausing tracking")
+                    else:
+                        if self.locked:
+                            self.locked = False
+                            print("🔓 Hand open: Resuming tracking")
+
+                    if self.locked:
+                        time.sleep(0.05)
+                        continue
+
+                    # Motor Mapping - lamp follows hand direction
+                    raw_yaw = (x_norm - 0.5) * 120
+                    raw_pitch = (0.5 - y_norm) * 80
+                    
+                    # Smoothing
+                    self.smooth_yaw = (self.smooth_yaw * (1-self.alpha)) + (raw_yaw * self.alpha)
+                    self.smooth_pitch = (self.smooth_pitch * (1-self.alpha)) + (raw_pitch * self.alpha)
+                    
+                    self._update_motors(self.smooth_yaw, self.smooth_pitch)
+                    print(f"🎯 Motor update: yaw={self.smooth_yaw:.1f}, pitch={self.smooth_pitch:.1f}")
                     
             except Exception as e:
-                logger.error(f"Color tracking error: {e}")
-                print(f"❌ Error: {e}")
+                logger.error(f"MediaPipe error: {e}")
                 time.sleep(0.5)
                 
-            time.sleep(0.02)  # ~50 FPS
+            time.sleep(0.01)
             
         cap.release()
-        if self.show_preview:
-            cv2.destroyAllWindows()
         
     def _update_motors(self, yaw_deg, pitch_deg):
         if not self.motor_service:
+            print("❌ No motor service available")
             return
         
-        # Base Yaw (Motor 1)
+        # Base Yaw
         yaw_offset = self.motor_service.offsets.get('base_yaw', 2048)
         yaw_pos = int(yaw_offset + (yaw_deg / 180.0) * 2048)
         self.motor_service._set_position(1, yaw_pos)
