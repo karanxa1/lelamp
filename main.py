@@ -688,6 +688,11 @@ NEVER respond without calling play_animation first!"""
         if animation_lower not in valid_animations:
             return f"Unknown animation: {animation}. Available: {', '.join(valid_animations)}"
         
+        # Skip animations when hand tracking is active (motors controlled by vision)
+        if self.vision_service and self.vision_service.running:
+            print(f"🎭 Animation skipped (hand tracking active): {animation_lower}")
+            return f"Animation {animation_lower} skipped (hand tracking active)"
+        
         if self.motors_service:
             self.motors_service.dispatch("play", animation_lower)
             print(f"🎭 Playing animation: {animation_lower}")
