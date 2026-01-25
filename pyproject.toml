@@ -9,26 +9,25 @@ dependencies = [
     "edge-tts>=7.2.7",
     "feetech-servo-sdk>=1.0.0",
     "firebase-admin>=6.0.0",
-    "lerobot>=0.3.3",
     "numpy>=2.2.6",
     "pvporcupine>=3.0.5",
     "pvrecorder>=1.2.7",
     "pyarrow==20.0.0",
     "pyaudio>=0.2.14",
+    "pyserial>=3.5",
     "python-dotenv",
     "requests>=2.31.0",
     "sounddevice>=0.5.2",
     "soundfile>=0.13.1",
-    "mediapipe==0.10.14",
     "opencv-python-headless",
     "protobuf",
 ]
-
-[tool.uv.sources]
-lerobot = { git = "https://github.com/huggingface/lerobot" }
 
 [project.optional-dependencies]
 hardware = [
     "adafruit-circuitpython-neopixel",
     "rpi-ws281x",
 ]
+# Note: For Raspberry Pi ARM, install mediapipe-rpi4==0.8.8 manually:
+# pip install mediapipe-rpi4==0.8.8
+# For other platforms, use: pip install mediapipe==0.10.14

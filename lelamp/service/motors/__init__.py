@@ -1,3 +1,2 @@
-from .motors_service import MotorsService
-
-__all__ = ['MotorsService']
+# from .motors_service import MotorsService (Disabled to avoid lerobot dependency)
+# __all__ = ['MotorsService']

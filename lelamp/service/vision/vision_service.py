@@ -18,17 +18,26 @@ class VisionService:
         # MediaPipe Setup (TFLite Backend)
         try:
             self.mp_hands = mp.solutions.hands
-        except AttributeError:
-            # Fallback for some installs
-            import mediapipe.python.solutions.hands
-            self.mp_hands = mp.solutions.hands
-            
-        self.hands = self.mp_hands.Hands(
-            static_image_mode=False,
-            max_num_hands=1,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5
-        )
+            self.hands = self.mp_hands.Hands(
+                static_image_mode=False,
+                max_num_hands=1,
+                min_detection_confidence=0.5,
+                min_tracking_confidence=0.5
+            )
+        except (AttributeError, ModuleNotFoundError):
+            # Fallback for mediapipe-rpi4
+            try:
+                import mediapipe_rpi4 as mp_rpi
+                self.mp_hands = mp_rpi.solutions.hands
+                self.hands = self.mp_hands.Hands(
+                    static_image_mode=False,
+                    max_num_hands=1,
+                    min_detection_confidence=0.5,
+                    min_tracking_confidence=0.5
+                )
+            except Exception as e:
+                logger.error(f"Failed to initialize MediaPipe: {e}")
+                raise
         
         # Tracking State
         self.smooth_yaw = 0.0
