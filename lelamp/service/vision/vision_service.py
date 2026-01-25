@@ -82,7 +82,7 @@ class VisionService:
             try:
                 results = self.hands.process(img_rgb)
                 
-                if results.multi_hand_landmarks and not self.locked:
+                if results.multi_hand_landmarks:
                     # Get first hand
                     hand = results.multi_hand_landmarks[0]
                     
@@ -103,7 +103,7 @@ class VisionService:
                     # Pinky (20 vs 18)
                     if hand.landmark[20].y > hand.landmark[18].y: fingers_closed += 1
                     
-                    # If 3 or more fingers closed -> Fist detected
+                    # Gesture detection (always runs)
                     if fingers_closed >= 3:
                         # Fist = BRAKE / PAUSE
                         if not self.locked:
@@ -115,7 +115,7 @@ class VisionService:
                             self.locked = False
                             logger.info("🔓 Hand open: Resuming tracking")
 
-                    # If locked, skip motor updates
+                    # If locked, skip motor updates but continue detection loop
                     if self.locked:
                         time.sleep(0.05)
                         continue
