@@ -460,7 +460,6 @@ NEVER respond without calling play_animation first!"""
                 }
             },
             {
-                "type": "function",
                 "name": "search_web",
                 "description": "Search the internet for real-time information, news, or facts using Google Search. Use this when you don't know the answer or need up-to-date info.",
                 "parameters": {
