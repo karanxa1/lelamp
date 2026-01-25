@@ -18,6 +18,7 @@ import threading
 import time
 import numpy as np
 import sounddevice as sd
+import requests  # For Serper API
 import edge_tts
 from dotenv import load_dotenv
 from datetime import datetime, timezone
@@ -459,6 +460,21 @@ NEVER respond without calling play_animation first!"""
                 }
             },
             {
+                "type": "function",
+                "name": "search_web",
+                "description": "Search the internet for real-time information, news, or facts using Google Search. Use this when you don't know the answer or need up-to-date info.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "The search query (e.g. 'current weather in Tokyo' or 'who won the super bowl 2024')",
+                        },
+                    },
+                    "required": ["query"],
+                },
+            },
+            {
                 "name": "play_animation",
                 "description": "Play a physical motor animation to express emotions through body movement. Use frequently to show personality! Available: curious, excited, happy_wiggle, headshake, nod, sad, scanning, shock, shy, wake_up.",
                 "parameters": {
@@ -611,6 +627,54 @@ NEVER respond without calling play_animation first!"""
                 change = f"decreased from {old_volume}% to {new_volume}%"
             else:
                 change = f"already at {new_volume}%"
+                
+            return f"Volume set to {new_volume}% ({change})"
+            
+        except Exception as e:
+            return f"Failed to set volume: {e}"
+
+    def _search_web(self, query: str) -> str:
+        """Execute Google Search using Serper API"""
+        # User API Key default
+        api_key = os.getenv("SERPER_API_KEY") or "994d8826d49aa3396315688419398c824ed722c0"
+        
+        if not api_key:
+            return "Error: Serper API key not configured."
+            
+        print(f"🔍 Searching web for: '{query}'")
+        
+        url = "https://google.serper.dev/search"
+        payload = json.dumps({"q": query})
+        headers = {
+            'X-API-KEY': api_key,
+            'Content-Type': 'application/json'
+        }
+        
+        try:
+            response = requests.post(url, headers=headers, data=payload, timeout=5)
+            if response.status_code == 200:
+                results = response.json()
+                
+                # Extract snippet from knowledge graph or organic results
+                summary = []
+                
+                # Check for answer box (direct answer)
+                if "answerBox" in results:
+                    summary.append(f"Direct Answer: {results['answerBox'].get('answer') or results['answerBox'].get('snippet')}")
+                
+                # Check for organic results
+                if "organic" in results:
+                    for i, item in enumerate(results["organic"][:3]):
+                        summary.append(f"{i+1}. {item.get('title')}: {item.get('snippet')}")
+                        
+                if not summary:
+                    return "No good search results found."
+                    
+                return "\\n".join(summary)
+            else:
+                return f"Search failed with status code: {response.status_code}"
+        except Exception as e:
+            return f"Search error: {e}"
             
             print(f"🔊 Volume {change}")
             return f"Volume {change}"
@@ -781,6 +845,8 @@ NEVER respond without calling play_animation first!"""
                 result = self._execute_get_time()
             elif func_name == "set_alarm":
                 result = self._execute_set_alarm(args.get("time", ""), args.get("label", "Alarm"))
+            elif func_name == "search_web":
+                result = self._search_web(args.get("query", ""))
             else:
                 result = f"Unknown function: {func_name}"
             
