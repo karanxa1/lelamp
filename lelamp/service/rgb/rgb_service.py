@@ -1,38 +1,30 @@
-from typing import Any, List, Union
-from rpi_ws281x import PixelStrip, Color
+from typing import Any, List, Union, Tuple
+import serial
+import time
 from ..base import ServiceBase
 
 
 class RGBService(ServiceBase):
     def __init__(self, 
                  led_count: int = 64,
-                 led_pin: int = 12,
-                 led_freq_hz: int = 800000,
-                 led_dma: int = 10,
-                 led_brightness: int = 255,
-                 led_invert: bool = False,
-                 led_channel: int = 0,
-                 color_order: str = "RGB"):  # User's strip uses RGB
+                 port: str = '/dev/serial0',
+                 baud_rate: int = 115200):
         super().__init__("rgb")
         
         self.led_count = led_count
-        self.color_order = color_order.upper()
-        self.strip = PixelStrip(
-            led_count, led_pin, led_freq_hz, led_dma, 
-            led_invert, led_brightness, led_channel
-        )
-        self.strip.begin()
-    
-    def _make_color(self, r: int, g: int, b: int) -> int:
-        """Convert RGB to correct color order for the strip"""
-        if self.color_order == "GRB":
-            return Color(g, r, b)  # WS2812B standard
-        elif self.color_order == "BGR":
-            return Color(b, g, r)
-        else:  # RGB
-            return Color(r, g, b)
-        
+        try:
+            self.ser = serial.Serial(port, baud_rate, timeout=1)
+            # Wait for Arduino reset
+            time.sleep(2)
+        except serial.SerialException as e:
+            self.logger.error(f"Failed to open serial port {port}: {e}")
+            self.ser = None
+
     def handle_event(self, event_type: str, payload: Any):
+        if not self.ser or not self.ser.is_open:
+            self.logger.warning("Serial port not open, skipping event")
+            return
+
         if event_type == "solid":
             self._handle_solid(payload)
         elif event_type == "paint":
@@ -40,51 +32,70 @@ class RGBService(ServiceBase):
         else:
             self.logger.warning(f"Unknown event type: {event_type}")
     
-    def _handle_solid(self, color_code: Union[int, tuple]):
-        """Fill entire strip with single color"""
+    def _parse_color(self, color_code: Union[int, tuple]) -> Tuple[int, int, int]:
+        """Convert color input to (r, g, b) tuple"""
         if isinstance(color_code, tuple) and len(color_code) == 3:
-            color = self._make_color(color_code[0], color_code[1], color_code[2])
+            return (color_code[0], color_code[1], color_code[2])
         elif isinstance(color_code, int):
-            color = color_code
+            # Assumes 0xRRGGBB format
+            r = (color_code >> 16) & 0xFF
+            g = (color_code >> 8) & 0xFF
+            b = color_code & 0xFF
+            return (r, g, b)
         else:
             self.logger.error(f"Invalid color format: {color_code}")
-            return
-            
-        for i in range(self.led_count):
-            self.strip.setPixelColor(i, color)
-        self.strip.show()
-        self.logger.debug(f"Applied solid color: {color_code}")
-    
+            return (0, 0, 0)
+
+    def _handle_solid(self, color_code: Union[int, tuple]):
+        """Fill entire strip with single color via Serial"""
+        r, g, b = self._parse_color(color_code)
+        
+        try:
+            self.ser.write(b's')
+            self.ser.write(bytes([r, g, b]))
+            self.logger.debug(f"Sent solid color command: {r},{g},{b}")
+        except Exception as e:
+            self.logger.error(f"Error sending solid command: {e}")
+
     def _handle_paint(self, colors: List[Union[int, tuple]]):
-        """Set individual pixel colors from array (8x8 = 64 pixels)"""
+        """Send pixel array via Serial"""
         if not isinstance(colors, list):
             self.logger.error(f"Paint payload must be a list, got: {type(colors)}")
             return
             
-        max_pixels = min(len(colors), self.led_count)
+        data = bytearray()
+        count = 0
         
-        for i in range(max_pixels):
-            color_code = colors[i]
-            if isinstance(color_code, tuple) and len(color_code) == 3:
-                color = self._make_color(color_code[0], color_code[1], color_code[2])
-            elif isinstance(color_code, int):
-                color = color_code
+        # Pad or truncate to match led_count exactly
+        for i in range(self.led_count):
+            if i < len(colors):
+                r, g, b = self._parse_color(colors[i])
             else:
-                self.logger.warning(f"Invalid color at index {i}: {color_code}")
-                continue
-                
-            self.strip.setPixelColor(i, color)
-        
-        self.strip.show()
-        self.logger.debug(f"Applied paint pattern with {max_pixels} colors")
+                r, g, b = 0, 0, 0 # Pad with black if list is short
+            
+            data.append(r)
+            data.append(g)
+            data.append(b)
+            count += 1
+            
+        try:
+            self.ser.write(b'p')
+            self.ser.write(data)
+            self.logger.debug(f"Sent paint command with {count} pixels")
+        except Exception as e:
+            self.logger.error(f"Error sending paint command: {e}")
     
     def clear(self):
         """Turn off all LEDs"""
-        for i in range(self.led_count):
-            self.strip.setPixelColor(i, Color(0, 0, 0))
-        self.strip.show()
+        if self.ser and self.ser.is_open:
+            try:
+                self.ser.write(b'c')
+            except Exception as e:
+                self.logger.error(f"Error sending clear command: {e}")
     
     def stop(self, timeout: float = 5.0):
-        """Override stop to clear LEDs before stopping"""
+        """Close serial connection"""
         self.clear()
+        if self.ser and self.ser.is_open:
+            self.ser.close()
         super().stop(timeout)
