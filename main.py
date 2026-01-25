@@ -470,8 +470,31 @@ NEVER respond without calling play_animation first!"""
                             "description": "The search query (e.g. 'current weather in Tokyo' or 'who won the super bowl 2024')",
                         },
                     },
+
                     "required": ["query"],
                 },
+            },
+            {
+                "name": "play_music",
+                "description": "Play music from YouTube. Use this when user says 'play music', 'play [song name]', or asks for a specific track.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "The song or artist to play (e.g. 'Blinding Lights', 'Lo-Fi beats')",
+                        }
+                    },
+                    "required": ["query"]
+                }
+            },
+            {
+                "name": "stop_music",
+                "description": "Stop currently playing music. Use when user says 'stop music', 'pause', or 'stop audio'.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {}
+                }
             },
             {
                 "name": "play_animation",
@@ -679,6 +702,55 @@ NEVER respond without calling play_animation first!"""
         except Exception as e:
             print(f"❌ Search exception: {e}")
             return f"Search error: {e}"
+
+    def _play_music(self, query: str) -> str:
+        """Play music using yt-dlp and mpv"""
+        if not query: return "No song specified."
+        
+        print(f"🎵 Searching YouTube for: '{query}'")
+        self._stop_music() # Stop any current playback
+        
+        try:
+            # 1. Get Audio URL
+            # yt-dlp "ytsearch1:QUERY" --get-url -f bestaudio
+            cmd_search = [
+                "yt-dlp", 
+                f"ytsearch1:{query}", 
+                "--get-url", 
+                "-f", "bestaudio"
+            ]
+            result = subprocess.run(cmd_search, capture_output=True, text=True, timeout=10)
+            
+            if result.returncode != 0 or not result.stdout.strip():
+                print(f"❌ yt-dlp failed: {result.stderr}")
+                return f"Could not find music for '{query}'"
+                
+            stream_url = result.stdout.strip()
+            print(f"✅ Found stream URL")
+            
+            # 2. Play with mpv (background process)
+            # --no-video: Audio only
+            cmd_play = ["mpv", stream_url, "--no-video"]
+            subprocess.Popen(cmd_play, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+            # 3. Visuals
+            if self.rgb_service:
+                self.rgb_service.dispatch("paint", get_face("happy"))
+                
+            return f"Playing {query}..."
+            
+        except Exception as e:
+            print(f"❌ Music error: {e}")
+            return f"Failed to play music: {e}"
+
+    def _stop_music(self) -> str:
+        """Stop mpv playback"""
+        try:
+            subprocess.run(["pkill", "mpv"], capture_output=True)
+            print("⏹️ Music stopped")
+            return "Music stopped."
+        except Exception as e:
+            return f"Error stopping music: {e}"
             
             print(f"🔊 Volume {change}")
             return f"Volume {change}"
@@ -851,6 +923,10 @@ NEVER respond without calling play_animation first!"""
                 result = self._execute_set_alarm(args.get("time", ""), args.get("label", "Alarm"))
             elif func_name == "search_web":
                 result = self._search_web(args.get("query", ""))
+            elif func_name == "play_music":
+                result = self._play_music(args.get("query", ""))
+            elif func_name == "stop_music":
+                result = self._stop_music()
             else:
                 result = f"Unknown function: {func_name}"
             
