@@ -69,9 +69,9 @@ class VisionService:
             self.running = False
             return
 
-        # Low res for performance on Pi (320x240 for 12-20 FPS)
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
+        # Standard resolution for better field of view
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         
         while self.running:
             success, img = cap.read()
@@ -127,15 +127,13 @@ class VisionService:
                         continue
 
                     # Motor Mapping
-                    # X: 0.0(Left) -> 1.0(Right).
-                    # Inverted Yaw: Moving hand Right (x>0.5) should make robot turn Right (-ve?) or Left (+ve?)
-                    # If it was moving opposite, we simply flip the sign.
-                    # Previous: (x - 0.5) * 100. New: (x - 0.5) * -120 (Inverted)
-                    raw_yaw = (x_norm - 0.5) * -120
+                    # X: 0.0(Left) -> 1.0(Right)
+                    # Positive = lamp follows hand direction
+                    raw_yaw = (x_norm - 0.5) * 120  # Removed negative sign
                     
-                    # Pitch: Map 0.0-1.0. 
-                    # Previous: (0.5 - y) * 80. New: (0.5 - y) * -80 (Inverted)
-                    raw_pitch = (0.5 - y_norm) * -80
+                    # Pitch: Map 0.0-1.0
+                    # Positive = lamp follows hand up/down
+                    raw_pitch = (0.5 - y_norm) * 80  # Removed negative sign
                     
                     # Smoothing
                     self.smooth_yaw = (self.smooth_yaw * (1-self.alpha)) + (raw_yaw * self.alpha)
