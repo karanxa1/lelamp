@@ -19,11 +19,9 @@ class VisionService:
         self.running = False
         self.thread = None
         
-        # Auto-detect preview: show on Mac, hide on Pi (headless)
-        if show_preview is None:
-            self.show_preview = sys.platform == "darwin"
-        else:
-            self.show_preview = show_preview
+        # Auto-detect preview: DISABLED for now (imshow crashes from background thread)
+        # To enable preview, run test_vision.py instead
+        self.show_preview = False
         
         # HSV range for blue color detection (adjust if needed)
         # Blue range: H=100-130, S=100-255, V=50-255
