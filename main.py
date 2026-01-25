@@ -382,10 +382,10 @@ Animation Guide:
 - 'shy' → Receiving compliments, being flattered, modest moments
 - 'headshake' → Disagreeing, saying no, correcting mistakes
 
-✋ HAND TRACKING:
-- You have a camera! If user asks to "follow my hand", "track me", or "hand mode" -> Call start_hand_tracking.
-- Explain: "Okay! Show me your hand and I'll follow it. Close your fist to lock/pause."
-- If user says "stop following" -> Call stop_hand_tracking.
+🔵 BLUE COLOR TRACKING:
+- You have a camera! If user asks to "track blue", "track blue colour", "follow blue", or "track mode" -> Call start_color_tracking.
+- Explain: "Okay! Hold up a blue object and I'll follow it!"
+- If user says "stop tracking" or "stop following" -> Call stop_color_tracking.
 
 
 
@@ -443,16 +443,16 @@ NEVER respond without calling play_animation first!"""
                 }
             },
             {
-                "name": "start_hand_tracking",
-                "description": "Enable Hand Tracking Mode. The lamp will physically follow the user's hand movements. Call this when user says 'follow my hand' or asking to track/see them.",
+                "name": "start_color_tracking",
+                "description": "Enable Blue Color Tracking Mode. The lamp will physically follow any blue colored object. Call this when user says 'track blue', 'track blue colour', 'follow blue', or 'track mode'.",
                 "parameters": {
                     "type": "object",
                     "properties": {}
                 }
             },
             {
-                "name": "stop_hand_tracking",
-                "description": "Disable Hand Tracking Mode. Return to normal assistant mode. Call when user says 'stop following' or 'stop tracking'.",
+                "name": "stop_color_tracking",
+                "description": "Disable Color Tracking Mode. Return to normal assistant mode. Call when user says 'stop tracking', 'stop following', or 'normal mode'.",
                 "parameters": {
                     "type": "object",
                     "properties": {}
@@ -772,9 +772,9 @@ NEVER respond without calling play_animation first!"""
                 result = self._execute_set_led_face(args.get("face", "happy"))
             elif func_name == "play_animation":
                 result = self._execute_play_animation(args.get("animation", "nod"))
-            elif func_name == "start_hand_tracking":
+            elif func_name == "start_color_tracking" or func_name == "start_hand_tracking":
                 result = self._execute_start_tracking()
-            elif func_name == "stop_hand_tracking":
+            elif func_name == "stop_color_tracking" or func_name == "stop_hand_tracking":
                 result = self._execute_stop_tracking()
 
             elif func_name == "get_current_time":
