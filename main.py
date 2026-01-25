@@ -521,7 +521,6 @@ NEVER respond without calling play_animation first!"""
                         "type": "deepgram",
                         "model": "nova-2",
                     },
-                    "endpointing": 300,
                 },
                 "think": {
                     "provider": {
