@@ -21,7 +21,7 @@ edge-tts>=6.1.9
 adafruit-circuitpython-neopixel
 rpi-ws281x
 
-# mediapipe (Installed separately via install_vision_pi.sh)
+mediapipe-rpi4==0.8.8
 opencv-python-headless
 protobuf
 

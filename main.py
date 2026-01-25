@@ -124,8 +124,8 @@ try:
     # Vision Service (Lightweight Color Tracking)
     from lelamp.service.vision.vision_service import VisionService
     VISION_ENABLED = True
-except ImportError:
-    print("⚠️ Vision dependencies not found")
+except ImportError as e:
+    print(f"⚠️ Vision dependencies not found: {e}")
 
 
 
