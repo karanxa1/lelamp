@@ -13,7 +13,7 @@ sudo apt-get install -y \
     ffmpeg \
     libsm6 \
     libxext6 \
-    libatlas-base-dev \
+    libopenblas-dev \
     portaudio19-dev \
     libopencv-dev
 
