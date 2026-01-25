@@ -33,6 +33,7 @@ class VisionService:
         self.hands = self.mp_hands.Hands(
             static_image_mode=False,
             max_num_hands=1,
+            model_complexity=0,  # 0 = Fastest (essential for Pi), 1 = Accurate
             min_detection_confidence=0.5,
             min_tracking_confidence=0.5
         )
