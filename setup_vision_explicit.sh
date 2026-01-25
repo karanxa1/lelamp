@@ -38,6 +38,14 @@ pip install \
     pyserial \
     requests \
     python-dotenv \
-    soundfile
+    soundfile \
+    "hf_transfer" \
+    "huggingface_hub" \
+    "lerobot @ git+https://github.com/huggingface/lerobot"
+
+# 5. FORCE downgrade protobuf to fix MediaPipe conflict
+# Many packages (like firebase-admin or google-api-core) pull in new protobuf
+echo "🔧 Forcing Protobuf Downgrade..."
+pip install "protobuf==3.20.3" --force-reinstall
 
 echo "✅ Vision Environment Ready at .venv_vision"
