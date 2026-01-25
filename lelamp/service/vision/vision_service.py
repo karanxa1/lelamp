@@ -107,6 +107,8 @@ class VisionService:
                     # Pinky (20 vs 18)
                     if hand.landmark[20].y > hand.landmark[18].y: fingers_closed += 1
                     
+                    print(f"👆 Fingers closed: {fingers_closed}/4, locked={self.locked}")
+                    
                     # Gesture detection (always runs)
                     if fingers_closed >= 3:
                         # Fist = BRAKE / PAUSE
