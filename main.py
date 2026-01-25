@@ -118,14 +118,17 @@ try:
 except ImportError as e:
     print(f"⚠️ Motors not available: {e}")
 
-# Vision Service (Hand Tracking)
+# Vision Service (Hand Tracking) - MAC ONLY
 VISION_ENABLED = False
-try:
-    # Vision Service (Lightweight Color Tracking)
-    from lelamp.service.vision.vision_service import VisionService
-    VISION_ENABLED = True
-except ImportError as e:
-    print(f"⚠️ Vision dependencies not found: {e}")
+if sys.platform == "darwin":
+    try:
+        # Vision Service (Lightweight Color Tracking)
+        from lelamp.service.vision.vision_service import VisionService
+        VISION_ENABLED = True
+    except ImportError as e:
+        print(f"⚠️ Vision dependencies not found: {e}")
+else:
+    print("⚠️ Vision Service disabled (Not on Mac)")
 
 
 
