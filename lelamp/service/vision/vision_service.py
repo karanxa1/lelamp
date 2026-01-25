@@ -79,7 +79,8 @@ class VisionService:
                 time.sleep(0.1)
                 continue
                 
-            img = cv2.flip(img, 1)
+            # Don't flip - keep natural camera orientation for correct tracking direction
+            # img = cv2.flip(img, 1)
             img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
             
             try:
