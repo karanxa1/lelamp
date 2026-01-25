@@ -289,9 +289,9 @@ class LeLampAgent:
                 
         # Vision Service (Hand Tracking)
         self.vision_service = None
-        if VISION_ENABLED and self.motors_service:
+        if VISION_ENABLED:
             try:
-                # Share the motor service with vision service
+                # Share the motor service with vision service (can be None)
                 self.vision_service = VisionService(motor_service=self.motors_service)
                 print("✓ Vision Service initialized (Wait for 'start_tracking' command)")
             except Exception as e:
