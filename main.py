@@ -16,6 +16,7 @@ import json
 import asyncio
 import threading
 import time
+import subprocess # For running external commands like mpv/yt-dlp
 import numpy as np
 import sounddevice as sd
 import requests  # For Serper API
