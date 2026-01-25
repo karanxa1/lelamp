@@ -280,6 +280,8 @@ class LeLampAgent:
     def _init_services(self):
         """Initialize hardware services in parallel/background to speed up startup"""
         
+
+        
         # 1. Firebase (Background)
         init_firebase()
         
