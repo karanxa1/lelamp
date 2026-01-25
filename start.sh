@@ -124,7 +124,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 # Determine python command
-if [ -f ".venv/bin/python" ]; then
+if [ -f ".venv_vision/bin/python" ]; then
+    echo "🐍 Using dedicated vision environment (.venv_vision)"
+    PYTHON_CMD=".venv_vision/bin/python"
+    
+    # Check if running as root
+    if [ "$EUID" -eq 0 ]; then
+        $PYTHON_CMD main.py console
+    else
+        sudo -E $PYTHON_CMD main.py console
+    fi
+elif [ -f ".venv/bin/python" ]; then
     echo "🐍 Using local environment (.venv)"
     PYTHON_CMD=".venv/bin/python"
     
@@ -135,7 +145,7 @@ if [ -f ".venv/bin/python" ]; then
         sudo -E $PYTHON_CMD main.py console
     fi
 else
-    echo "⚠️ Local .venv not found, falling back to uv run..."
+    echo "⚠️ Local venv not found, falling back to uv run..."
     
     if [ -f ~/.local/bin/uv ]; then
         UV_PATH=~/.local/bin/uv
