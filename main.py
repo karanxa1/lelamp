@@ -252,8 +252,7 @@ class LeLampAgent:
         self.current_volume = 50  # Track current volume for increase/decrease
         
         # 16kHz is optimal for speech STT (faster processing)
-        # However, if mic is 44.1kHz/48kHz, using native rate avoids resampling artifacts
-        self.input_sample_rate = 44100
+        self.input_sample_rate = 16000
         self.output_sample_rate = 24000
         
         # Edge TTS for fast voice output
@@ -520,8 +519,9 @@ NEVER respond without calling play_animation first!"""
                 "listen": {
                     "provider": {
                         "type": "deepgram",
-                        "model": "nova-3",
+                        "model": "nova-2",
                     },
+                    "endpointing": 300,
                 },
                 "think": {
                     "provider": {

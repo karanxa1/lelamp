@@ -105,22 +105,15 @@ class VisionService:
                     
                     # If 3 or more fingers closed -> Fist detected
                     if fingers_closed >= 3:
-                        if not hasattr(self, '_fist_hold_start') or self._fist_hold_start is None:
-                            self._fist_hold_start = time.time()
-                        elif time.time() - self._fist_hold_start > 0.5: # Hold for 0.5 second
-                             # Toggle Lock
-                             self.locked = not self.locked
-                             state = "LOCKED" if self.locked else "UNLOCKED"
-                             logger.info(f"🔒 Gesture: Fist held -> Tracking {state}")
-                             
-                             # Visual feedback via Motors (Video game "rumble" style or nod)
-                             if self.motor_service:
-                                 self.motor_service.dispatch("play", "nod")
-                                 
-                             # Reset hold time to prevent rapid toggling
-                             self._fist_hold_start = time.time() + 2.0 
+                        # Fist = BRAKE / PAUSE
+                        if not self.locked:
+                            self.locked = True
+                            logger.info("🔒 Fist detected: Pausing tracking")
                     else:
-                        self._fist_hold_start = None
+                        # Open Hand = TRACK
+                        if self.locked:
+                            self.locked = False
+                            logger.info("🔓 Hand open: Resuming tracking")
 
                     # If locked, skip motor updates
                     if self.locked:
@@ -128,12 +121,15 @@ class VisionService:
                         continue
 
                     # Motor Mapping
-                    # X: 0.0(Left) -> 1.0(Right). Motors: -ve -> +ve
-                    # Yaw: Map 0.0-1.0 to -50deg to +50deg
-                    raw_yaw = (x_norm - 0.5) * 100
+                    # X: 0.0(Left) -> 1.0(Right).
+                    # Inverted Yaw: Moving hand Right (x>0.5) should make robot turn Right (-ve?) or Left (+ve?)
+                    # If it was moving opposite, we simply flip the sign.
+                    # Previous: (x - 0.5) * 100. New: (x - 0.5) * -120 (Inverted)
+                    raw_yaw = (x_norm - 0.5) * -120
                     
-                    # Pitch: Map 0.0-1.0 to +40deg to -40deg
-                    raw_pitch = (0.5 - y_norm) * 80
+                    # Pitch: Map 0.0-1.0. 
+                    # Previous: (0.5 - y) * 80. New: (0.5 - y) * -80 (Inverted)
+                    raw_pitch = (0.5 - y_norm) * -80
                     
                     # Smoothing
                     self.smooth_yaw = (self.smooth_yaw * (1-self.alpha)) + (raw_yaw * self.alpha)
