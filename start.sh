@@ -123,19 +123,33 @@ echo ""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# Run with sudo -E to preserve environment variables (needed for GPIO)
-if [ -f ~/.local/bin/uv ]; then
-    UV_PATH=~/.local/bin/uv
-elif command -v uv &> /dev/null; then
-    UV_PATH=$(which uv)
+# Determine python command
+if [ -f ".venv/bin/python" ]; then
+    echo "🐍 Using local environment (.venv)"
+    PYTHON_CMD=".venv/bin/python"
+    
+    # Check if running as root
+    if [ "$EUID" -eq 0 ]; then
+        $PYTHON_CMD main.py console
+    else
+        sudo -E $PYTHON_CMD main.py console
+    fi
 else
-    echo "❌ ERROR: UV not found. Install with: curl -LsSf https://astral.sh/uv/install.sh | sh"
-    exit 1
-fi
-
-# Check if running as root already
-if [ "$EUID" -eq 0 ]; then
-    $UV_PATH run main.py console
-else
-    sudo -E $UV_PATH run main.py console
+    echo "⚠️ Local .venv not found, falling back to uv run..."
+    
+    if [ -f ~/.local/bin/uv ]; then
+        UV_PATH=~/.local/bin/uv
+    elif command -v uv &> /dev/null; then
+        UV_PATH=$(which uv)
+    else
+        echo "❌ ERROR: UV not found. Install with: curl -LsSf https://astral.sh/uv/install.sh | sh"
+        exit 1
+    fi
+    
+    # Check if running as root already
+    if [ "$EUID" -eq 0 ]; then
+        $UV_PATH run main.py console
+    else
+        sudo -E $UV_PATH run main.py console
+    fi
 fi
