@@ -153,11 +153,14 @@ class VisionService:
         cap.release()
         
     def _update_motors(self, yaw_deg, pitch_deg):
-        if not self.motor_service: return
+        if not self.motor_service:
+            print("❌ No motor service available")
+            return
         
         # Base Yaw
         yaw_offset = self.motor_service.offsets.get('base_yaw', 2048)
         yaw_pos = int(yaw_offset + (yaw_deg / 180.0) * 2048)
+        print(f"🔧 Sending Motor 1 (yaw): offset={yaw_offset}, pos={yaw_pos}")
         self.motor_service._set_position(1, yaw_pos)
         
         # Pitch Logic (Inverse Kinematics approx)
