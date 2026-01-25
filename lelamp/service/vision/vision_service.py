@@ -106,7 +106,7 @@ class VisionService:
                     
                     # If 3 or more fingers closed -> Fist detected
                     if fingers_closed >= 3:
-                        if not hasattr(self, '_fist_hold_start'):
+                        if not hasattr(self, '_fist_hold_start') or self._fist_hold_start is None:
                             self._fist_hold_start = time.time()
                         elif time.time() - self._fist_hold_start > 1.0: # Hold for 1 second
                              # Toggle Lock
