@@ -286,9 +286,23 @@ class LeLampAgent:
         # 2. RGB LED (Background)
         if RGB_ENABLED:
             try:
+                # Legacy direct GPIO arguments removed. Now using Serial (Arduino Level Shifter).
+                rgb_port = os.getenv("RGB_PORT", "/dev/ttyUSB0")
+                if sys.platform == "darwin":
+                   # On Mac, try to find a second modem port or use default
+                   import glob
+                   ports = glob.glob('/dev/cu.usbmodem*')
+                   # If we have ports and one is used for motors, try another?
+                   # For now, just pick the last one or user defined
+                   if len(ports) > 1 and ports[0] == MOTOR_PORT:
+                       rgb_port = ports[1]
+                   elif ports:
+                       rgb_port = ports[-1] # Fallback
+                
                 self.rgb_service = RGBService(
-                    led_count=64, led_pin=12, led_freq_hz=800000,
-                    led_dma=10, led_brightness=255, led_invert=False, led_channel=0
+                    led_count=64,
+                    port=rgb_port,
+                    baud_rate=115200
                 )
                 self.rgb_service.start()
                 # Run startup animation in its own thread to not block

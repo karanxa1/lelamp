@@ -53,18 +53,19 @@ class RGBService(ServiceBase):
             return (0, 0, 0)
 
     def _handle_solid(self, color_code: Union[int, tuple]):
-        """Fill entire strip with single color via Serial"""
+        """Fill entire strip with single color via Serial (Text Protocol: RrrGggBbb)"""
         r, g, b = self._parse_color(color_code)
         
         try:
-            self.ser.write(b's')
-            self.ser.write(bytes([r, g, b]))
-            self.logger.debug(f"Sent solid color command: {r},{g},{b}")
+            # Protocol: R255G000B000\n
+            cmd = f"R{r:03d}G{g:03d}B{b:03d}\n"
+            self.ser.write(cmd.encode())
+            self.logger.debug(f"Sent solid color command: {cmd.strip()}")
         except Exception as e:
             self.logger.error(f"Error sending solid command: {e}")
 
     def _handle_paint(self, colors: List[Union[int, tuple]]):
-        """Send pixel array via Serial"""
+        """Send pixel array via Serial (Binary Protocol: 'p' + 192 bytes)"""
         if not isinstance(colors, list):
             self.logger.error(f"Paint payload must be a list, got: {type(colors)}")
             return
@@ -85,6 +86,7 @@ class RGBService(ServiceBase):
             count += 1
             
         try:
+            # Protocol: 'p' (binary marker) + 192 bytes raw data
             self.ser.write(b'p')
             self.ser.write(data)
             self.logger.debug(f"Sent paint command with {count} pixels")
