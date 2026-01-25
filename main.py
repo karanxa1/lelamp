@@ -109,7 +109,8 @@ except ImportError as e:
 # Vision Service (Hand Tracking)
 VISION_ENABLED = False
 try:
-    from lelamp.service.vision.vision_service import VisionService
+    # from lelamp.service.vision.vision_service import VisionService
+    from lelamp.service.vision.simple_vision_service import VisionService
     VISION_ENABLED = True
 except ImportError:
     print("⚠️ Vision dependencies not found")
