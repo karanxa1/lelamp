@@ -28,7 +28,8 @@ class VisionService:
         # Tracking State
         self.smooth_yaw = 0.0
         self.smooth_pitch = 0.0
-        self.alpha = 0.3  # Smoothing factor (higher = more responsive)
+        self.alpha = 0.15  # Smoothing factor (lower = smoother movement)
+        self.deadzone = 3.0  # Ignore small movements (degrees)
         
         # Frame dimensions (set when camera opens)
         self.frame_width = 640
@@ -120,20 +121,22 @@ class VisionService:
                         if frame_count % 10 == 0:
                             print(f"🔵 Blue detected: x={x_norm:.2f}, y={y_norm:.2f}, area={area:.0f}")
                         
-                        # Motor Mapping
+                        # Motor Mapping (reduced range for smoother control)
                         # X: 0.0(Left) -> 1.0(Right)
-                        raw_yaw = (x_norm - 0.5) * 120
+                        raw_yaw = (x_norm - 0.5) * 80  # Reduced from 120
                         
                         # Pitch: Map 0.0(Top) -> 1.0(Bottom)
-                        raw_pitch = (0.5 - y_norm) * 80
+                        raw_pitch = (0.5 - y_norm) * 50  # Reduced from 80
                         
-                        # Smoothing
+                        # Smoothing with exponential moving average
                         self.smooth_yaw = (self.smooth_yaw * (1-self.alpha)) + (raw_yaw * self.alpha)
                         self.smooth_pitch = (self.smooth_pitch * (1-self.alpha)) + (raw_pitch * self.alpha)
                         
-                        self._update_motors(self.smooth_yaw, self.smooth_pitch)
+                        # Only update motors if movement is significant (deadzone)
+                        if abs(self.smooth_yaw) > self.deadzone or abs(self.smooth_pitch) > self.deadzone:
+                            self._update_motors(self.smooth_yaw, self.smooth_pitch)
                         
-                        if frame_count % 10 == 0:
+                        if frame_count % 15 == 0:
                             print(f"🎯 Motor: yaw={self.smooth_yaw:.1f}, pitch={self.smooth_pitch:.1f}")
                     
             except Exception as e:
