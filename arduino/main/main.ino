@@ -10,21 +10,32 @@ void setup() {
   Serial.begin(BAUDRATE);
   pixels.begin();
   pixels.show(); // Initialize all pixels to 'off'
+  
+  // Debug toggle to signal startup
+  pinMode(13, OUTPUT);
+  digitalWrite(13, HIGH);
+  delay(100);
+  digitalWrite(13, LOW);
+  delay(100);
+  digitalWrite(13, HIGH);
 }
 
 void loop() {
   if (Serial.available() > 0) {
     char cmd = Serial.read();
     
+    // Toggle internal LED on any command
+    digitalWrite(13, !digitalRead(13)); 
+
     if (cmd == 'p') { // Paint frame
-      // Wait for all data (64 LEDs * 3 channels = 192 bytes)
-      // Blocking wait might be dangerous if packets drop, but keep it simple for now
-      // A small timeout mechanism would be better but keeping it "short"
+      // Paint is large, better to read carefully
+      // We expect 192 bytes.
       uint8_t buffer[NUMPIXELS * 3];
       int count = 0;
       unsigned long start = millis();
       
-      while(count < NUMPIXELS * 3 && (millis() - start < 100)) { // 100ms timeout
+      // Increased timeout slightly for paint
+      while(count < NUMPIXELS * 3 && (millis() - start < 200)) { 
          if(Serial.available()) {
             buffer[count++] = Serial.read();
          }
@@ -38,11 +49,12 @@ void loop() {
       }
     }
     else if (cmd == 's') { // Solid color
+       // Set Brightness global if needed or just color
        unsigned long start = millis();
        uint8_t buf[3];
        int c = 0;
        
-       while(c < 3 && (millis() - start < 50)) {
+       while(c < 3 && (millis() - start < 100)) {
           if (Serial.available()) buf[c++] = Serial.read();
        }
        
@@ -57,6 +69,15 @@ void loop() {
     else if (cmd == 'c') { // Clear
       pixels.clear();
       pixels.show();
+    }
+    else if (cmd == 'b') { // Set brightness (optional future proofing)
+       unsigned long start = millis();
+       while(!Serial.available() && (millis() - start < 100));
+       if (Serial.available()) {
+         uint8_t b = Serial.read();
+         pixels.setBrightness(b);
+         pixels.show();
+       }
     }
   }
 }

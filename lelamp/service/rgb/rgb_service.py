@@ -8,10 +8,16 @@ class RGBService(ServiceBase):
     def __init__(self, 
                  led_count: int = 64,
                  port: str = '/dev/serial0',
-                 baud_rate: int = 115200):
+                 baud_rate: int = 115200,
+                 led_dma: int = 10,
+                 led_brightness: int = 32,
+                 led_invert: bool = False):
         super().__init__("rgb")
         
         self.led_count = led_count
+        self.led_dma = led_dma
+        self.led_brightness = led_brightness
+        self.led_invert = led_invert
         try:
             self.ser = serial.Serial(port, baud_rate, timeout=1)
             # Wait for Arduino reset
