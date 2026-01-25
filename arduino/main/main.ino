@@ -9,36 +9,46 @@ Adafruit_NeoPixel pixels(NUMPIXELS, PIN, NEO_GRB + NEO_KHZ800);
 void setup() {
   Serial.begin(BAUDRATE);
   pixels.begin();
-  pixels.show(); // Initialize all pixels to 'off'
+  pixels.setBrightness(32); // Safe brightness
+  pixels.show(); 
   
-  // Debug toggle to signal startup
+  // --- STARTUP SELF-TEST ---
+  // This runs automatically on power/reset.
+  // If you don't see this, the LED Wiring or Power is WRONG.
+  
+  // 1. Red
+  colorWipe(pixels.Color(255, 0, 0), 10); 
+  delay(500);
+  
+  // 2. Green
+  colorWipe(pixels.Color(0, 255, 0), 10);
+  delay(500);
+  
+  // 3. Blue
+  colorWipe(pixels.Color(0, 0, 255), 10);
+  delay(500);
+  
+  // 4. Off
+  colorWipe(pixels.Color(0, 0, 0), 5);
+  // -------------------------
+  
+  // Signal ready with onboard LED
   pinMode(13, OUTPUT);
-  digitalWrite(13, HIGH);
-  delay(100);
-  digitalWrite(13, LOW);
-  delay(100);
-  digitalWrite(13, HIGH);
+  blink(3);
 }
 
 void loop() {
   if (Serial.available() > 0) {
     char cmd = Serial.read();
-    
-    // Toggle internal LED on any command
-    digitalWrite(13, !digitalRead(13)); 
+    digitalWrite(13, HIGH); // LED On while processing
 
     if (cmd == 'p') { // Paint frame
-      // Paint is large, better to read carefully
-      // We expect 192 bytes.
       uint8_t buffer[NUMPIXELS * 3];
       int count = 0;
       unsigned long start = millis();
       
-      // Increased timeout slightly for paint
       while(count < NUMPIXELS * 3 && (millis() - start < 200)) { 
-         if(Serial.available()) {
-            buffer[count++] = Serial.read();
-         }
+         if(Serial.available()) buffer[count++] = Serial.read();
       }
       
       if (count == NUMPIXELS * 3) {
@@ -49,7 +59,6 @@ void loop() {
       }
     }
     else if (cmd == 's') { // Solid color
-       // Set Brightness global if needed or just color
        unsigned long start = millis();
        uint8_t buf[3];
        int c = 0;
@@ -70,14 +79,23 @@ void loop() {
       pixels.clear();
       pixels.show();
     }
-    else if (cmd == 'b') { // Set brightness (optional future proofing)
-       unsigned long start = millis();
-       while(!Serial.available() && (millis() - start < 100));
-       if (Serial.available()) {
-         uint8_t b = Serial.read();
-         pixels.setBrightness(b);
-         pixels.show();
-       }
-    }
+    
+    digitalWrite(13, LOW); // LED Off
+  }
+}
+
+// Helper for startup animation
+void colorWipe(uint32_t color, int wait) {
+  for(int i=0; i<pixels.numPixels(); i++) {
+    pixels.setPixelColor(i, color);
+    pixels.show();
+    delay(wait);
+  }
+}
+
+void blink(int times) {
+  for(int i=0; i<times; i++) {
+    digitalWrite(13, HIGH); delay(100);
+    digitalWrite(13, LOW); delay(100);
   }
 }
