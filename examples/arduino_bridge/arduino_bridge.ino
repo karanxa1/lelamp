@@ -40,6 +40,31 @@ void loop() {
         setSolidColor(pixels.Color(r, g, b));
       }
     }
+    else if (cmd == 'p') { // Paint Frame
+      int expected = NUMPIXELS * 3;
+      int count = 0;
+      unsigned long start = millis();
+      
+      // Temporary buffer for RGB triplet
+      uint8_t rgb[3]; 
+
+      while(count < expected) {
+         if(Serial.available()) {
+            // Read 3 bytes at a time for each pixel? 
+            // No, just read byte by byte to be robust
+            int pixelIdx = count / 3;
+            int channel = count % 3;
+            rgb[channel] = Serial.read();
+            
+            if (channel == 2) { // We have R,G,B for this pixel
+                pixels.setPixelColor(pixelIdx, pixels.Color(rgb[0], rgb[1], rgb[2]));
+            }
+            count++;
+         }
+         if(millis() - start > 500) break; // Timeout
+      }
+      pixels.show(); 
+    }
   }
 }
 

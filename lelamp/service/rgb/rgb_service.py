@@ -20,8 +20,21 @@ class RGBService(ServiceBase):
         self.led_invert = led_invert
         try:
             self.ser = serial.Serial(port, baud_rate, timeout=1)
-            # Wait for Arduino reset
-            time.sleep(2)
+            # Wait for Arduino reset and handshake
+            self.logger.info("Waiting for Arduino READY signal...")
+            start_time = time.time()
+            ready = False
+            while time.time() - start_time < 5.0:
+                if self.ser.in_waiting:
+                    line = self.ser.readline().decode('utf-8', errors='ignore').strip()
+                    if "READY" in line:
+                        ready = True
+                        self.logger.info("Arduino is READY")
+                        break
+                time.sleep(0.1)
+            
+            if not ready:
+                self.logger.warning("No READY signal from Arduino (timeout). Continuing anyway.")
         except serial.SerialException as e:
             self.logger.error(f"Failed to open serial port {port}: {e}")
             self.ser = None
