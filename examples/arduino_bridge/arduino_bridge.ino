@@ -1,42 +1,48 @@
 #include <Adafruit_NeoPixel.h>
 
-#define PIN        3        // Arduino Pin connected to Data In of LED strip
-#define NUMPIXELS  64       // Number of LEDs
-#define BAUDRATE   115200   // specific baud rate matching the Pi script
+#define PIN        3        
+#define NUMPIXELS  64       
+#define BAUDRATE   115200   
 
-// Initialize NeoPixel strip
 Adafruit_NeoPixel pixels(NUMPIXELS, PIN, NEO_GRB + NEO_KHZ800);
 
 void setup() {
-  Serial.begin(BAUDRATE); // Start serial communication
-  pixels.begin();         // Initialize NeoPixel library
-  pixels.setBrightness(50); // Set brightness (0-255)
-  pixels.show();          // Initialize all pixels to 'off'
+  Serial.begin(BAUDRATE);
+  pixels.begin();         
+  pixels.setBrightness(50); 
+  pixels.show();          
+
+  // Startup Flash - Then stay ON (Dim White)
+  for(int i=0; i<NUMPIXELS; i++) {
+     pixels.setPixelColor(i, pixels.Color(20, 20, 20)); // Dim White
+  }
+  pixels.show();
+
+  // HANDSHAKE: Tell Python we are ready
+  Serial.println("READY");
 }
 
 void loop() {
   if (Serial.available() > 0) {
     char cmd = Serial.read();
 
-    if (cmd == 's') { // 's' for Set Color (Solid)
-      waitForBytes(3); // Wait for R, G, B values
-      uint8_t r = Serial.read();
-      uint8_t g = Serial.read();
-      uint8_t b = Serial.read();
+    if (cmd == 's') { // Set Solid Color
+      // Wait safely for 3 bytes
+      unsigned long start = millis();
+      while(Serial.available() < 3) {
+         if(millis() - start > 500) break; // Timeout
+      }
       
-      setSolidColor(pixels.Color(r, g, b));
+      if(Serial.available() >= 3) {
+        uint8_t r = Serial.read();
+        uint8_t g = Serial.read();
+        uint8_t b = Serial.read();
+        setSolidColor(pixels.Color(r, g, b));
+      }
     }
   }
 }
 
-// Helper to wait for N bytes available on Serial
-void waitForBytes(int n) {
-  while (Serial.available() < n) {
-    delay(1);
-  }
-}
-
-// Function to set all pixels to a color
 void setSolidColor(uint32_t c) {
   for(int i=0; i<NUMPIXELS; i++) {
     pixels.setPixelColor(i, c);

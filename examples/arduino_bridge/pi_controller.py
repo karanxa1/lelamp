@@ -22,9 +22,24 @@ def main():
     try:
         # Initialize Serial Connection
         print(f"Connecting to Arduino on {SERIAL_PORT}...")
-        arduino = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
-        time.sleep(2) # Wait for Arduino to reset
-        print("Connected!")
+        arduino = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=2)
+        
+        # HANDSHAKE: Wait for Arduino to reboot and say "READY"
+        print("Waiting for Arduino to boot...")
+        ready = False
+        for _ in range(10): # Try for 5-10 seconds
+            line = arduino.readline().decode().strip()
+            if "READY" in line:
+                ready = True
+                break
+            time.sleep(0.5)
+            
+        if not ready:
+            print("⚠️ Warning: No 'READY' signal received. Data might be lost (Arduino didn't reset?). Continuing anyway.")
+        else:
+            print("✅ Arduino is READY!")
+
+        time.sleep(0.5) # Short buffer
 
         # Example: Cycle through colors
         colors = [
@@ -61,4 +76,7 @@ def send_color(ser, r, g, b):
     ser.write(packet)
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) > 1 and sys.argv[1] == "list":
+        list_available_ports()
+    else:
+        main()
