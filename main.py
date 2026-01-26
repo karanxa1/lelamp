@@ -287,8 +287,9 @@ class LeLampAgent:
         if RGB_ENABLED:
             try:
                 self.rgb_service = RGBService(
-                    led_count=64, led_pin=12, led_freq_hz=800000,
-                    led_dma=10, led_brightness=255, led_invert=False, led_channel=0
+                    led_count=64, 
+                    port='/dev/ttyACM0', # Updated to match your Arduino port
+                    led_brightness=32    # Match default safely
                 )
                 self.rgb_service.start()
                 # Run startup animation in its own thread to not block
