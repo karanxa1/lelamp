@@ -1,0 +1,810 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LeLamp Nova - AI-Powered Robotic Desk Lamp</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        background: linear-gradient(
+          135deg,
+          #1a1a2e 0%,
+          #16213e 50%,
+          #0f3460 100%
+        );
+        min-height: 100vh;
+        overflow-x: hidden;
+      }
+
+      .slide {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        padding: 60px 80px;
+        position: relative;
+        page-break-after: always;
+      }
+
+      .slide-number {
+        position: absolute;
+        bottom: 30px;
+        right: 40px;
+        color: rgba(255, 255, 255, 0.4);
+        font-size: 14px;
+      }
+
+      /* Title Slide */
+      .title-slide {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        text-align: center;
+      }
+
+      .title-slide h1 {
+        font-size: 4rem;
+        color: white;
+        margin-bottom: 20px;
+        text-shadow: 2px 2px 10px rgba(0, 0, 0, 0.3);
+      }
+
+      .title-slide .subtitle {
+        font-size: 1.8rem;
+        color: rgba(255, 255, 255, 0.9);
+        margin-bottom: 40px;
+      }
+
+      .title-slide .meta {
+        color: rgba(255, 255, 255, 0.7);
+        font-size: 1.2rem;
+        line-height: 2;
+      }
+
+      .lamp-icon {
+        font-size: 100px;
+        margin-bottom: 30px;
+        animation: bounce 2s infinite;
+      }
+
+      @keyframes bounce {
+        0%,
+        100% {
+          transform: translateY(0);
+        }
+        50% {
+          transform: translateY(-15px);
+        }
+      }
+
+      /* Content Slides */
+      .content-slide {
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      }
+
+      .content-slide h2 {
+        font-size: 2.8rem;
+        color: #667eea;
+        margin-bottom: 50px;
+        text-align: center;
+        position: relative;
+      }
+
+      .content-slide h2::after {
+        content: "";
+        position: absolute;
+        bottom: -15px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 100px;
+        height: 4px;
+        background: linear-gradient(90deg, #667eea, #764ba2);
+        border-radius: 2px;
+      }
+
+      .content-box {
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 20px;
+        padding: 40px;
+        max-width: 1000px;
+        width: 100%;
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+      }
+
+      .content-box p {
+        color: rgba(255, 255, 255, 0.9);
+        font-size: 1.3rem;
+        line-height: 1.8;
+        text-align: center;
+      }
+
+      /* Features Grid */
+      .features-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 30px;
+        max-width: 1100px;
+      }
+
+      .feature-card {
+        background: rgba(255, 255, 255, 0.08);
+        border-radius: 16px;
+        padding: 30px;
+        text-align: center;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        transition:
+          transform 0.3s,
+          box-shadow 0.3s;
+      }
+
+      .feature-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 20px 40px rgba(102, 126, 234, 0.2);
+      }
+
+      .feature-icon {
+        font-size: 50px;
+        margin-bottom: 20px;
+      }
+
+      .feature-card h3 {
+        color: #667eea;
+        font-size: 1.2rem;
+        margin-bottom: 15px;
+      }
+
+      .feature-card p {
+        color: rgba(255, 255, 255, 0.7);
+        font-size: 0.95rem;
+        line-height: 1.6;
+      }
+
+      /* Two Column Layout */
+      .two-column {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 50px;
+        max-width: 1100px;
+      }
+
+      .column {
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 16px;
+        padding: 35px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+      }
+
+      .column h3 {
+        color: #667eea;
+        font-size: 1.5rem;
+        margin-bottom: 25px;
+        text-align: center;
+      }
+
+      .column ul {
+        list-style: none;
+      }
+
+      .column li {
+        color: rgba(255, 255, 255, 0.85);
+        font-size: 1.1rem;
+        padding: 12px 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .column li:last-child {
+        border-bottom: none;
+      }
+
+      .check-icon {
+        color: #4ade80;
+        font-weight: bold;
+      }
+
+      /* Table Styles */
+      .table-container {
+        max-width: 900px;
+        width: 100%;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 16px;
+        overflow: hidden;
+      }
+
+      th {
+        background: linear-gradient(90deg, #667eea, #764ba2);
+        color: white;
+        padding: 20px;
+        font-size: 1.1rem;
+        text-align: left;
+      }
+
+      td {
+        padding: 18px 20px;
+        color: rgba(255, 255, 255, 0.85);
+        font-size: 1rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      }
+
+      tr:last-child td {
+        border-bottom: none;
+      }
+
+      tr:hover {
+        background: rgba(102, 126, 234, 0.1);
+      }
+
+      /* Architecture Diagram */
+      .architecture {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 20px;
+        max-width: 900px;
+      }
+
+      .arch-row {
+        display: flex;
+        gap: 20px;
+        flex-wrap: wrap;
+        justify-content: center;
+      }
+
+      .arch-box {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 20px 35px;
+        border-radius: 12px;
+        font-size: 1.1rem;
+        font-weight: 600;
+        text-align: center;
+        min-width: 150px;
+      }
+
+      .arch-box.secondary {
+        background: rgba(255, 255, 255, 0.1);
+        border: 2px solid #667eea;
+      }
+
+      .arrow-down {
+        color: #667eea;
+        font-size: 2rem;
+      }
+
+      /* Future Enhancement Cards */
+      .enhancement-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 20px;
+        max-width: 1000px;
+      }
+
+      .enhancement-card {
+        background: rgba(255, 255, 255, 0.08);
+        border-radius: 12px;
+        padding: 25px 20px;
+        text-align: center;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+      }
+
+      .enhancement-card .icon {
+        font-size: 35px;
+        margin-bottom: 15px;
+      }
+
+      .enhancement-card p {
+        color: rgba(255, 255, 255, 0.85);
+        font-size: 0.95rem;
+      }
+
+      /* Conclusion Slide */
+      .conclusion-slide {
+        background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+        text-align: center;
+      }
+
+      .conclusion-slide h2 {
+        color: white;
+        font-size: 3rem;
+        margin-bottom: 40px;
+      }
+
+      .conclusion-slide h2::after {
+        background: rgba(255, 255, 255, 0.5);
+      }
+
+      .conclusion-points {
+        display: flex;
+        gap: 40px;
+        margin-bottom: 50px;
+      }
+
+      .conclusion-point {
+        background: rgba(255, 255, 255, 0.15);
+        border-radius: 16px;
+        padding: 30px;
+        flex: 1;
+        max-width: 280px;
+      }
+
+      .conclusion-point .icon {
+        font-size: 50px;
+        margin-bottom: 15px;
+      }
+
+      .conclusion-point h3 {
+        color: white;
+        font-size: 1.3rem;
+        margin-bottom: 10px;
+      }
+
+      .conclusion-point p {
+        color: rgba(255, 255, 255, 0.85);
+        font-size: 1rem;
+      }
+
+      .thank-you {
+        font-size: 2.5rem;
+        color: white;
+        margin-top: 30px;
+      }
+
+      /* Print styles */
+      @media print {
+        .slide {
+          page-break-after: always;
+          min-height: 100vh;
+        }
+        body {
+          background: white;
+        }
+      }
+
+      /* Navigation hint */
+      .nav-hint {
+        position: fixed;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        color: rgba(255, 255, 255, 0.4);
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Slide 1: Title -->
+    <div class="slide title-slide">
+      <div class="lamp-icon">💡</div>
+      <h1>LeLamp Nova</h1>
+      <p class="subtitle">AI-Powered Robotic Desk Lamp</p>
+      <div class="meta">
+        <p><strong>Organization:</strong> CoreToWeb / Human Computer Lab</p>
+        <p><strong>Developer:</strong> @pham-tuan-binh</p>
+        <p><strong>Contact:</strong> binhpham@binhph.am</p>
+      </div>
+      <span class="slide-number">1 / 12</span>
+    </div>
+
+    <!-- Slide 2: Objective -->
+    <div class="slide content-slide">
+      <h2>🎯 Objective</h2>
+      <div class="content-box">
+        <p>
+          Design and develop an
+          <strong>AI-powered robotic desk lamp</strong> with intelligent voice
+          interaction, animated LED expressions, and real-time gesture control.
+          Named <strong>Nova</strong>, the system combines speech recognition,
+          natural language processing, and computer vision to create an
+          engaging, personality-driven desk companion inspired by the iconic
+          Pixar lamp.
+        </p>
+      </div>
+      <span class="slide-number">2 / 12</span>
+    </div>
+
+    <!-- Slide 3: Key Features -->
+    <div class="slide content-slide">
+      <h2>✨ Key Features</h2>
+      <div class="features-grid">
+        <div class="feature-card">
+          <div class="feature-icon">🎤</div>
+          <h3>Voice Interaction</h3>
+          <p>
+            Real-time speech recognition via Deepgram Nova-2 and ultra-low
+            latency Edge TTS
+          </p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">😊</div>
+          <h3>LED Expressions</h3>
+          <p>
+            8x8 NeoPixel matrix with animated faces: happy, sad, thinking,
+            surprised
+          </p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🤖</div>
+          <h3>5-DOF Robotic Arm</h3>
+          <p>
+            Pre-recorded animations for emotions: nod, excited, curious, shy
+          </p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🧠</div>
+          <h3>AI Responses</h3>
+          <p>GPT-4o-mini for intelligent, personality-driven conversations</p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">✋</div>
+          <h3>Hand Tracking</h3>
+          <p>
+            MediaPipe vision for following hand movements and gesture control
+          </p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🌐</div>
+          <h3>Web Dashboard</h3>
+          <p>Control panel for RGB, expressions, chat history via FastAPI</p>
+        </div>
+      </div>
+      <span class="slide-number">3 / 12</span>
+    </div>
+
+    <!-- Slide 4: Scope of Work -->
+    <div class="slide content-slide">
+      <h2>📋 Scope of Work</h2>
+      <div class="two-column">
+        <div class="column">
+          <h3>Core Systems</h3>
+          <ul>
+            <li>
+              <span class="check-icon">✔</span> Voice interaction pipeline
+              (STT/TTS)
+            </li>
+            <li><span class="check-icon">✔</span> AI conversational agent</li>
+            <li>
+              <span class="check-icon">✔</span> LED matrix expression system
+            </li>
+            <li>
+              <span class="check-icon">✔</span> Motor animation controller
+            </li>
+            <li>
+              <span class="check-icon">✔</span> Hand tracking vision system
+            </li>
+          </ul>
+        </div>
+        <div class="column">
+          <h3>Supporting Features</h3>
+          <ul>
+            <li>
+              <span class="check-icon">✔</span> Firebase conversation logging
+            </li>
+            <li>
+              <span class="check-icon">✔</span> Web-based control dashboard
+            </li>
+            <li><span class="check-icon">✔</span> Alarm & reminder service</li>
+            <li><span class="check-icon">✔</span> Web search integration</li>
+            <li>
+              <span class="check-icon">✔</span> Volume & LED color control
+            </li>
+          </ul>
+        </div>
+      </div>
+      <span class="slide-number">4 / 12</span>
+    </div>
+
+    <!-- Slide 5: System Architecture -->
+    <div class="slide content-slide">
+      <h2>🏗️ System Architecture</h2>
+      <div class="architecture">
+        <div class="arch-row">
+          <div class="arch-box">🎤 Microphone</div>
+          <div class="arch-box">📷 Camera</div>
+          <div class="arch-box">🔊 Speaker</div>
+        </div>
+        <div class="arrow-down">⬇️</div>
+        <div class="arch-row">
+          <div class="arch-box secondary">Deepgram STT</div>
+          <div class="arch-box secondary">MediaPipe</div>
+          <div class="arch-box secondary">Edge TTS</div>
+        </div>
+        <div class="arrow-down">⬇️</div>
+        <div class="arch-row">
+          <div class="arch-box" style="min-width: 300px">
+            🧠 LeLamp Agent (main.py)<br /><small
+              >GPT-4o-mini + Tool Calling</small
+            >
+          </div>
+        </div>
+        <div class="arrow-down">⬇️</div>
+        <div class="arch-row">
+          <div class="arch-box secondary">Motor Service</div>
+          <div class="arch-box secondary">RGB Service</div>
+          <div class="arch-box secondary">Vision Service</div>
+          <div class="arch-box secondary">Alarm Service</div>
+        </div>
+        <div class="arrow-down">⬇️</div>
+        <div class="arch-row">
+          <div class="arch-box">⚙️ Servos (5x)</div>
+          <div class="arch-box">💡 LED Matrix (8x8)</div>
+          <div class="arch-box">☁️ Firebase</div>
+        </div>
+      </div>
+      <span class="slide-number">5 / 12</span>
+    </div>
+
+    <!-- Slide 6: Technical Feasibility -->
+    <div class="slide content-slide">
+      <h2>🔧 Technical Feasibility</h2>
+      <div class="two-column">
+        <div class="column">
+          <h3>AI & Software Stack</h3>
+          <ul>
+            <li><span class="check-icon">✔</span> Deepgram Nova-2 (STT)</li>
+            <li><span class="check-icon">✔</span> Microsoft Edge TTS</li>
+            <li><span class="check-icon">✔</span> OpenAI GPT-4o-mini</li>
+            <li><span class="check-icon">✔</span> MediaPipe TFLite</li>
+            <li><span class="check-icon">✔</span> Python 3.12+</li>
+          </ul>
+        </div>
+        <div class="column">
+          <h3>Hardware Control</h3>
+          <ul>
+            <li>
+              <span class="check-icon">✔</span> Feetech STS3215 Serial Protocol
+            </li>
+            <li><span class="check-icon">✔</span> WS2812B via rpi_ws281x</li>
+            <li>
+              <span class="check-icon">✔</span> DMA Channel 10 (no audio
+              conflict)
+            </li>
+            <li>
+              <span class="check-icon">✔</span> Direct Serial Commands (Fast)
+            </li>
+            <li><span class="check-icon">✔</span> Cross-platform (Pi/Mac)</li>
+          </ul>
+        </div>
+      </div>
+      <span class="slide-number">6 / 12</span>
+    </div>
+
+    <!-- Slide 7: Hardware Requirements -->
+    <div class="slide content-slide">
+      <h2>🔩 Hardware Requirements</h2>
+      <div class="table-container">
+        <table>
+          <tr>
+            <th>Component</th>
+            <th>Specification</th>
+          </tr>
+          <tr>
+            <td>🖥️ Main Board</td>
+            <td>Raspberry Pi 4 or Pi 5</td>
+          </tr>
+          <tr>
+            <td>⚙️ Motors</td>
+            <td>5× Feetech STS3215 Servos (5-DOF Arm)</td>
+          </tr>
+          <tr>
+            <td>💡 LED Matrix</td>
+            <td>8×8 WS2812B NeoPixels (64 LEDs)</td>
+          </tr>
+          <tr>
+            <td>🎤 Microphone</td>
+            <td>USB PnP Sound Device</td>
+          </tr>
+          <tr>
+            <td>🔊 Speaker</td>
+            <td>3.5mm Audio Output</td>
+          </tr>
+          <tr>
+            <td>📷 Camera</td>
+            <td>USB/Pi Camera (for vision)</td>
+          </tr>
+          <tr>
+            <td>🔌 LED Controller</td>
+            <td>Arduino (Data Signal Relay)</td>
+          </tr>
+        </table>
+      </div>
+      <span class="slide-number">7 / 12</span>
+    </div>
+
+    <!-- Slide 8: Software Requirements -->
+    <div class="slide content-slide">
+      <h2>💻 Software Requirements</h2>
+      <div class="table-container">
+        <table>
+          <tr>
+            <th>Software</th>
+            <th>Purpose</th>
+          </tr>
+          <tr>
+            <td>Python 3.12+</td>
+            <td>Runtime Environment</td>
+          </tr>
+          <tr>
+            <td>UV (Astral)</td>
+            <td>Package Manager</td>
+          </tr>
+          <tr>
+            <td>Deepgram SDK</td>
+            <td>Speech-to-Text</td>
+          </tr>
+          <tr>
+            <td>Edge TTS</td>
+            <td>Text-to-Speech</td>
+          </tr>
+          <tr>
+            <td>MediaPipe</td>
+            <td>Hand Tracking/Vision</td>
+          </tr>
+          <tr>
+            <td>Firebase Admin</td>
+            <td>Cloud Database</td>
+          </tr>
+          <tr>
+            <td>FastAPI</td>
+            <td>Web Dashboard Backend</td>
+          </tr>
+        </table>
+      </div>
+      <span class="slide-number">8 / 12</span>
+    </div>
+
+    <!-- Slide 9: API Services -->
+    <div class="slide content-slide">
+      <h2>🌐 API Services</h2>
+      <div class="table-container">
+        <table>
+          <tr>
+            <th>Service</th>
+            <th>Purpose</th>
+            <th>Provider</th>
+          </tr>
+          <tr>
+            <td>LiveKit</td>
+            <td>Voice Room Streaming</td>
+            <td>livekit.io</td>
+          </tr>
+          <tr>
+            <td>Deepgram</td>
+            <td>Speech-to-Text</td>
+            <td>deepgram.com</td>
+          </tr>
+          <tr>
+            <td>OpenAI</td>
+            <td>GPT-4o-mini LLM</td>
+            <td>openai.com</td>
+          </tr>
+          <tr>
+            <td>Firebase</td>
+            <td>Conversation Logging</td>
+            <td>firebase.google.com</td>
+          </tr>
+          <tr>
+            <td>Serper</td>
+            <td>Web Search API</td>
+            <td>serper.dev</td>
+          </tr>
+        </table>
+      </div>
+      <span class="slide-number">9 / 12</span>
+    </div>
+
+    <!-- Slide 10: Financial Feasibility -->
+    <div class="slide content-slide">
+      <h2>💰 Financial Feasibility</h2>
+      <div class="two-column">
+        <div class="column">
+          <h3>Open-Source Stack</h3>
+          <ul>
+            <li><span class="check-icon">✔</span> Python (Free)</li>
+            <li><span class="check-icon">✔</span> FastAPI (Free)</li>
+            <li><span class="check-icon">✔</span> MediaPipe (Free)</li>
+            <li><span class="check-icon">✔</span> Edge TTS (Free)</li>
+            <li><span class="check-icon">✔</span> Firebase (Free Tier)</li>
+          </ul>
+        </div>
+        <div class="column">
+          <h3>Hardware Cost (~$100-150)</h3>
+          <ul>
+            <li>🔹 Raspberry Pi 4: ~$50-75</li>
+            <li>🔹 5x Servo Motors: ~$30-40</li>
+            <li>🔹 LED Matrix 8x8: ~$10-15</li>
+            <li>🔹 USB Mic + Speaker: ~$15-20</li>
+            <li>🔹 Arduino: ~$5-10</li>
+          </ul>
+        </div>
+      </div>
+      <span class="slide-number">10 / 12</span>
+    </div>
+
+    <!-- Slide 11: Future Enhancements -->
+    <div class="slide content-slide">
+      <h2>🚀 Future Enhancements</h2>
+      <div class="enhancement-grid">
+        <div class="enhancement-card">
+          <div class="icon">🌍</div>
+          <p>Multi-language Support</p>
+        </div>
+        <div class="enhancement-card">
+          <div class="icon">🏠</div>
+          <p>Smart Home Integration</p>
+        </div>
+        <div class="enhancement-card">
+          <div class="icon">🎵</div>
+          <p>Music Streaming</p>
+        </div>
+        <div class="enhancement-card">
+          <div class="icon">📱</div>
+          <p>Mobile App Control</p>
+        </div>
+        <div class="enhancement-card">
+          <div class="icon">🎭</div>
+          <p>Emotion Detection</p>
+        </div>
+        <div class="enhancement-card">
+          <div class="icon">🔗</div>
+          <p>Multi-lamp Sync</p>
+        </div>
+        <div class="enhancement-card">
+          <div class="icon">🎙️</div>
+          <p>Custom Wake Word</p>
+        </div>
+        <div class="enhancement-card">
+          <div class="icon">📴</div>
+          <p>Offline Local LLM</p>
+        </div>
+      </div>
+      <span class="slide-number">11 / 12</span>
+    </div>
+
+    <!-- Slide 12: Conclusion -->
+    <div class="slide conclusion-slide">
+      <h2>📌 Conclusion</h2>
+      <div class="conclusion-points">
+        <div class="conclusion-point">
+          <div class="icon">🤖</div>
+          <h3>Innovation</h3>
+          <p>Fusion of robotics, AI, and human-computer interaction</p>
+        </div>
+        <div class="conclusion-point">
+          <div class="icon">⚡</div>
+          <h3>Efficiency</h3>
+          <p>Low-latency voice with real-time expressions</p>
+        </div>
+        <div class="conclusion-point">
+          <div class="icon">📈</div>
+          <h3>Scalability</h3>
+          <p>Modular architecture for future expansion</p>
+        </div>
+      </div>
+      <p class="thank-you">Thank You! 🙏</p>
+      <br />
+      <p style="color: rgba(255, 255, 255, 0.7); font-size: 1.1rem">
+        <strong>Credits:</strong> Human Computer Lab | CoreToWeb Team | Kokoro
+        TTS
+      </p>
+      <span class="slide-number">12 / 12</span>
+    </div>
+
+    <div class="nav-hint">
+      Scroll to navigate slides • Print to PDF for PowerPoint import
+    </div>
+  </body>
+</html>
