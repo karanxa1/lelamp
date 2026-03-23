@@ -596,7 +596,17 @@ NEVER respond without calling play_animation first!"""
     # ===== TOOL EXECUTION FUNCTIONS =====
 
     # ===== TOOL EXECUTION FUNCTIONS =====
-    
+    def _notify_dashboard(self, update_type: str, data: dict):
+        """Send state update to web dashboard for simulation"""
+        def _notify():
+            try:
+                requests.post("http://localhost:8000/api/state/update", 
+                             json={"type": update_type, "data": data},
+                             timeout=0.5)
+            except:
+                pass
+        threading.Thread(target=_notify, daemon=True).start()
+
     def _execute_set_volume(self, volume_percent: int) -> str:
         """Execute volume control tool"""
         try:
@@ -628,9 +638,12 @@ NEVER respond without calling play_animation first!"""
             else:
                 change = f"already at {new_volume}%"
                 
+            print(f"🔊 Volume {change}")
+            self._notify_dashboard("volume", {"percent": new_volume})
             return f"Volume set to {new_volume}% ({change})"
             
         except Exception as e:
+            print(f"⚠️ Volume error: {e}")
             return f"Failed to set volume: {e}"
 
     def _search_web(self, query: str) -> str:
@@ -722,11 +735,12 @@ NEVER respond without calling play_animation first!"""
         if self.rgb_service:
             # Use 'solid' for faster single-color fill on 8x8 matrix
             self.rgb_service.dispatch("solid", rgb)
+            self._notify_dashboard("rgb", {"color": rgb})
             print(f"💡 8x8 LED matrix set to {color} {rgb}")
         else:
             print(f"💡 8x8 LED would be {color} {rgb} (no hardware)")
         
-        return f"LED color changed to {color}"
+        return f"LED color set to {color}."
     
     def _execute_set_led_face(self, face: str) -> str:
         """Execute LED face change tool"""
@@ -763,9 +777,11 @@ NEVER respond without calling play_animation first!"""
         
         if self.motors_service:
             self.motors_service.dispatch("play", animation_lower)
+            self._notify_dashboard("arm", {"animation": animation_lower})
             print(f"🎭 Playing animation: {animation_lower}")
             return f"Playing animation: {animation_lower}"
         else:
+            self._notify_dashboard("arm", {"animation": animation_lower})
             print(f"🎭 Animation would play: {animation_lower} (no motors)")
             return f"Animation {animation_lower} (motors not connected)"
     
@@ -887,9 +903,10 @@ NEVER respond without calling play_animation first!"""
             
         elif msg_type == "UserStartedSpeaking":
             print("👤 User speaking...")
+            self._notify_dashboard("voice", {"state": "listening"})
             if self.rgb_service:
                 self.rgb_service.dispatch("paint", get_face("listening"))
-                
+        
         elif msg_type == "ConversationText":
             role = getattr(message, "role", "")
             content = getattr(message, "content", "")
@@ -906,10 +923,12 @@ NEVER respond without calling play_animation first!"""
                 log_conversation(self.last_user_text, content)
                 
                 # Use Edge TTS for ultra-low latency
+                self._notify_dashboard("voice", {"state": "speaking", "text": content})
                 self.tts.speak(content)
                 
         elif msg_type == "AgentThinking":
             print("🧠 Thinking...")
+            self._notify_dashboard("voice", {"state": "thinking"})
             if self.rgb_service:
                 self.rgb_service.dispatch("paint", get_face("thinking"))
                 

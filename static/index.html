@@ -41,6 +41,28 @@
                 </header>
 
                 <div class="controls-grid">
+                    <!-- Virtual Nova Simulation Card -->
+                    <div class="card simulation-card">
+                        <h3>Virtual Nova (Simulation)</h3>
+                        <div class="virtual-lamp">
+                            <div class="led-matrix-container">
+                                <div id="virtual-led-matrix" class="led-matrix">
+                                    <!-- 64 pixels generated via JS -->
+                                </div>
+                            </div>
+                            <div class="lamp-status">
+                                <div class="status-row">
+                                    <span class="status-label">Voice:</span>
+                                    <span id="sim-voice-status" class="status-value">Idle</span>
+                                </div>
+                                <div class="status-row">
+                                    <span class="status-label">Arm:</span>
+                                    <span id="sim-arm-status" class="status-value">Stopped</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- RGB Control Card -->
                     <div class="card">
                         <h3>Light Color</h3>

@@ -149,6 +149,10 @@ class VoiceInput(BaseModel):
     audio: str  # base64 encoded audio
     format: str = "webm"
 
+class StateUpdate(BaseModel):
+    type: str # 'face', 'rgb', 'arm', 'voice'
+    data: dict
+
 # OpenAI client for voice processing (optional)
 try:
     from openai import OpenAI
@@ -180,7 +184,7 @@ async def lifespan(app: FastAPI):
     # Init RGB (only on Raspberry Pi)
     if RGB_AVAILABLE:
         try:
-            state.rgb_service = RGBService(led_count=64, led_pin=12, led_freq_hz=800000, led_dma=10, led_brightness=255, led_invert=False, led_channel=0)
+            state.rgb_service = RGBService(led_count=64, led_brightness=255)
             state.rgb_service.start()
             state.rgb_service.dispatch("solid", (255, 255, 255))
             print("✓ RGB LEDs initialized")
@@ -314,6 +318,17 @@ async def chat(chat_input: ChatInput):
     except Exception as e:
         await logger.log_event("chat_error", {"error": str(e)})
         return {"status": "error", "error": str(e)}
+
+# State Bridge - receives updates from main.py and broadcasts to WebSocket clients
+@app.post("/api/state/update")
+async def update_state(update: StateUpdate):
+    """Bridge for the voice agent to notify the dashboard of state changes"""
+    await state.broadcast({
+        "type": "state_update",
+        "update_type": update.type,
+        "data": update.data
+    })
+    return {"status": "ok"}
 
 
 # Get conversation history
