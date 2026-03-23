@@ -1,14 +1,4 @@
-"""
-LeLamp Voice Agent - Powered by Deepgram STT + LLM + Edge TTS
-
-Uses Deepgram for STT + LLM, and Edge TTS for ultra-low latency voice output.
-Optimized for Raspberry Pi.
-"""
-
 import sys
-print("=== LeLamp Agent Starting ===", flush=True)
-sys.stdout.flush()
-
 import os
 import io
 import queue
@@ -16,30 +6,25 @@ import json
 import asyncio
 import threading
 import time
+import base64
 import numpy as np
 import sounddevice as sd
-import requests  # For Serper API
-import edge_tts
+import requests
+import subprocess
 from dotenv import load_dotenv
 from datetime import datetime, timezone
 
-from deepgram import DeepgramClient
+from sarvamai.client import AsyncSarvamAI
 
 load_dotenv()
 
-print("✓ Loaded environment variables", flush=True)
+print("=== LeLamp Agent Starting (Sarvam Streaming Async) ===", flush=True)
 
-# Libraries are lazy-loaded in LeLampAgent to speed up startup
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-
-
-# Global DB reference (initialized lazily)
 db = None
-
 def init_firebase():
-    """Initialize Firebase in background"""
     global db
     if not firebase_admin._apps:
         try:
@@ -57,7 +42,6 @@ def init_firebase():
          print(f"⚠️ Firestore init failed: {e}")
 
 def log_conversation(user_input: str, ai_response: str):
-    """Log conversation to Firestore"""
     if not db: return
     try:
         db.collection("conversations").add({
@@ -66,14 +50,12 @@ def log_conversation(user_input: str, ai_response: str):
             "ai_response": ai_response,
             "input_type": "voice",
             "device": "lelamp",
-            "source": "deepgram_edge_tts"
+            "source": "sarvam"
         })
     except Exception as e:
         print(f"Firestore error: {e}")
 
-
 def log_event(event_type: str, data: dict):
-    """Log event to Firestore"""
     if not db: return
     try:
         db.collection("events").add({
@@ -84,7 +66,6 @@ def log_event(event_type: str, data: dict):
         })
     except Exception as e:
         print(f"Firestore event error: {e}")
-
 
 # RGB LED Service
 RGB_ENABLED = False
@@ -100,16 +81,9 @@ MOTORS_ENABLED = False
 MOTOR_PORT = None
 try:
     from lelamp.service.motors.direct_motors_service import DirectMotorsService
-    # Auto-detect USB port on Mac
     import glob
-    # Search for common serial ports on Mac and Linux/Pi
-    potential_ports = (
-        glob.glob('/dev/cu.usbmodem*') + 
-        glob.glob('/dev/tty.usbmodem*') + 
-        glob.glob('/dev/ttyACM*') + 
-        glob.glob('/dev/ttyUSB*')
-    )
-    
+    potential_ports = (glob.glob('/dev/cu.usbmodem*') + glob.glob('/dev/tty.usbmodem*') + 
+                       glob.glob('/dev/ttyACM*') + glob.glob('/dev/ttyUSB*'))
     if potential_ports:
         MOTOR_PORT = potential_ports[0]
         MOTORS_ENABLED = True
@@ -119,7 +93,7 @@ try:
 except ImportError as e:
     print(f"⚠️ Motors not available: {e}")
 
-# Vision Service (Hand Tracking) - Works on Mac and Raspberry Pi with Python 3.9
+# Vision Service
 VISION_ENABLED = False
 try:
     from lelamp.service.vision.vision_service import VisionService
@@ -128,231 +102,202 @@ try:
 except ImportError as e:
     print(f"⚠️ Vision dependencies not found: {e}")
 
-
-
 # Alarm Service
 from lelamp.service.alarm.alarm_service import AlarmService
 
 
-class EdgeTTSPlayer:
-    """Ultra-low latency TTS using Microsoft Edge TTS with queuing"""
-    
-    # Good voices for assistant: en-US-AriaNeural, en-US-JennyNeural, en-GB-SoniaNeural
-    VOICE = "en-US-AriaNeural"
-    
-    def __init__(self, sample_rate: int = 24000, on_start=None, on_stop=None):
-        self.sample_rate = sample_rate
-        self.queue = queue.Queue()
-        self._is_playing = False
-        self.on_start = on_start
-        self.on_stop = on_stop
-        
-        # Start worker thread
-        self._thread = threading.Thread(target=self._process_queue, daemon=True)
-        self._thread.start()
-    
-    @property
-    def is_speaking(self):
-        return self._is_playing or not self.queue.empty()
-    
-    def speak(self, text: str):
-        """Add text to speech queue"""
-        if text and text.strip():
-            self.queue.put(text)
-        
-    def _process_queue(self):
-        """Worker to process TTS queue sequentially"""
-        while True:
-            try:
-                text = self.queue.get()
-                
-                # Signal start if this is the first item in a burst
-                if not self._is_playing:
-                    self._is_playing = True
-                    if self.on_start:
-                        self.on_start()
-                
-                try:
-                    # Run async TTS
-                    asyncio.run(self._speak_async(text))
-                except Exception as e:
-                    print(f"⚠️ TTS error: {e}")
-                
-                # Check if queue is empty to signal stop
-                if self.queue.empty():
-                    # Small buffer to ensure echo is gone
-                    time.sleep(0.25)
-                    self._is_playing = False
-                    if self.on_stop:
-                        self.on_stop()
-                        
-                self.queue.task_done()
-            except Exception as e:
-                print(f"⚠️ TTS worker error: {e}")
-                time.sleep(0.1)
-
-    async def _speak_async(self, text: str):
-        """Async TTS with streaming playback"""
-        try:
-            communicate = edge_tts.Communicate(text, self.VOICE)
-            
-            # Collect audio chunks
-            audio_data = bytearray()
-            async for chunk in communicate.stream():
-                if chunk["type"] == "audio":
-                    audio_data.extend(chunk["data"])
-            
-            if not audio_data:
-                print("⚠️ No audio data received from Edge TTS")
-                return
-            
-            # Convert MP3 to PCM and play
-            import soundfile as sf
-            audio_array, sr = sf.read(io.BytesIO(bytes(audio_data)), dtype='float32')
-            
-            # Debug: Show audio device info
-            print(f"🔊 Playing {len(audio_array)/sr:.1f}s audio @ {sr}Hz")
-            
-            # Play with timeout protection
-            sd.play(audio_array, sr)
-            
-            # Wait with timeout (max 30 seconds per utterance)
-            timeout = max(30, len(audio_array) / sr + 5)
-            start = time.time()
-            while sd.get_stream().active:
-                if time.time() - start > timeout:
-                    print("⚠️ Audio playback timeout - stopping")
-                    sd.stop()
-                    break
-                time.sleep(0.1)
-                
-        except Exception as e:
-            print(f"⚠️ TTS playback error: {e}")
-            import traceback
-            traceback.print_exc()
-
-
 class LeLampAgent:
-    """Deepgram Voice Agent with Edge TTS for ultra-low latency"""
-    
     def __init__(self):
-        self.api_key = os.getenv("DEEPGRAM_API_KEY")
-        if not self.api_key:
-            raise ValueError("DEEPGRAM_API_KEY not set")
+        sarvam_key = os.getenv("SARVAM_API_KEY")
+        if not sarvam_key:
+            raise ValueError("SARVAM_API_KEY not set in .env")
+        self.sarvam_client = AsyncSarvamAI(api_subscription_key=sarvam_key)
         
-        self.client = DeepgramClient(api_key=self.api_key)
-        self.connection = None
         self.running = False
-        self.agent_speaking = False
+        self.is_speaking = False
+        self.is_processing = False  # True during the entire LLM/search/TTS turn
         
-        self.last_user_text = ""
+        self.mic_queue = asyncio.Queue()
+        
         self.conversation_history = []
-        self.current_volume = 50  # Track current volume for increase/decrease
+        self.current_volume = 50
         
-        # 16kHz is optimal for speech STT (faster processing)
-        self.input_sample_rate = 44100  # Standard audio sample rate
-        self.output_sample_rate = 24000
-        
-        # Edge TTS for fast voice output
-        self.tts = EdgeTTSPlayer(
-            sample_rate=self.output_sample_rate,
-            on_start=self._on_tts_start,
-            on_stop=self._on_tts_stop
-        )
-        
-        
-        # Services (initialized in background)
         self.rgb_service = None
         self.motors_service = None
         self.vision_service = None
         self.available_animations = []
         
-        # Start background initialization
-        threading.Thread(target=self._init_services, daemon=True).start()
+        self._init_services_thread = threading.Thread(target=self._init_services, daemon=True)
+        self._init_services_thread.start()
 
-        # Alarm Service - Fast enough to init here
         self.alarm_service = AlarmService(on_trigger=self._on_alarm_trigger)
         self.alarm_service.start()
         print("✓ Alarm Service initialized")
-            
-    def _init_services(self):
-        """Initialize hardware services in parallel/background to speed up startup"""
         
+        self._greeted = False
 
-        
-        # 1. Firebase (Background)
+    def _init_services(self):
         init_firebase()
-        
-        # 2. RGB LED (Background)
         if RGB_ENABLED:
             try:
-                self.rgb_service = RGBService(
-                    led_count=64, 
-                    port='/dev/ttyACM0', # Updated to match your Arduino port
-                    led_brightness=32    # Match default safely
-                )
+                self.rgb_service = RGBService(led_count=64, port='/dev/ttyACM0', led_brightness=32)
                 self.rgb_service.start()
-                # Run startup animation in its own thread to not block
                 def _run_wake_anim():
                     for pattern, duration in get_wake_animation():
                         if self.rgb_service: self.rgb_service.dispatch("paint", pattern)
                         time.sleep(duration)
                     if self.rgb_service: self.rgb_service.dispatch("paint", get_face("happy"))
-                
                 threading.Thread(target=_run_wake_anim, daemon=True).start()
                 print("✓ RGB LED initialized")
             except Exception as e:
                 print(f"⚠️ RGB LED init failed: {e}")
                 self.rgb_service = None
         
-        # 3. Motors (Background)
-        # Use simple global variable or check imported MOTORS_ENABLED
         if MOTORS_ENABLED and MOTOR_PORT:
             try:
-                self.motors_service = DirectMotorsService(
-                    port=MOTOR_PORT,
-                    fps=30
-                )
+                self.motors_service = DirectMotorsService(port=MOTOR_PORT, fps=30)
                 self.motors_service.start()
                 self.available_animations = self.motors_service.get_available_recordings()
-                print(f"✓ Motors initialized: {len(self.available_animations)} animations")
-                
-                # Go to home (0th) position first
-                print("🏠 Going to home position...")
                 self.motors_service._handle_home()
-                
-                # Then play wake_up animation if available
                 if "wake_up" in self.available_animations:
                     self.motors_service.dispatch("play", "wake_up")
             except Exception as e:
-                print(f"⚠️ Motors init failed: {e}")
                 self.motors_service = None
                 
-        # 4. Vision (Depends on Motors)
         if VISION_ENABLED:
             try:
-                # Share the motor service with vision service (can be None)
-                # Wait a bit for motors if they are enabled but not ready? 
-                # For now just pass what we have (might be None if motors failed or still initing - but we are in same thread)
                 self.vision_service = VisionService(motor_service=self.motors_service)
-                print("✓ Vision Service initialized (Wait for 'start_tracking' command)")
+                print("✓ Vision Service initialized")
             except Exception as e:
                 print(f"⚠️ Vision init failed: {e}")
-            
-    def _get_settings_dict(self, is_reconnect: bool = False) -> dict:
-        """Generate settings with function calling enabled"""
-        context_text = ""
-        if is_reconnect and self.conversation_history:
-            recent = self.conversation_history[-20:]
-            context_text = "\n\nPrevious conversation:\n"
-            for msg in recent:
-                role = "User" if msg["role"] == "user" else "Nova"
-                context_text += f"{role}: {msg['content']}\n"
-            context_text += "\nContinue naturally without repeating greetings."
+
+    def _on_alarm_trigger(self, label: str):
+        print(f"⏰ ALARM TRIGGERED: {label}")
+        if self.rgb_service: self.rgb_service.dispatch("paint", get_face("surprised"))
+        if self.motors_service: self.motors_service.dispatch("play", "excited")
         
-        # Get current time for prompt context
+        text = f"Alarm! It is time for {label}!"
+        print("Alarm ringing...")
+
+    def _notify_dashboard(self, update_type: str, data: dict):
+        def _notify():
+            try:
+                requests.post("http://localhost:8000/api/state/update", json={"type": update_type, "data": data}, timeout=0.5)
+            except:
+                pass
+        threading.Thread(target=_notify, daemon=True).start()
+
+    def _execute_set_volume(self, volume_percent: int) -> str:
+        try:
+            new_volume = max(0, min(100, int(volume_percent)))
+            if sys.platform == "darwin":
+                import subprocess
+                subprocess.run(["osascript", "-e", f"set volume output volume {new_volume}"], timeout=5)
+            else:
+                import subprocess
+                subprocess.run(["amixer", "sset", "Master", f"{new_volume}%"], timeout=5)
+            self.current_volume = new_volume
+            self._notify_dashboard("volume", {"percent": new_volume})
+            return f"Volume set to {new_volume}%"
+        except Exception as e:
+            return f"Failed to set volume: {e}"
+
+    def _execute_set_led_color(self, color: str) -> str:
+        color_map = {
+            "red": (255, 0, 0), "green": (0, 255, 0), "blue": (0, 0, 255),
+            "yellow": (255, 200, 0), "purple": (150, 0, 255), "cyan": (0, 255, 255),
+            "orange": (255, 100, 0), "pink": (255, 100, 150), "white": (255, 255, 255),
+            "warm": (255, 180, 100), "cool": (200, 220, 255), "off": (0, 0, 0),
+        }
+        color_lower = color.lower().strip()
+        rgb = color_map.get(color_lower, (255,255,255))
+        if self.rgb_service:
+            self.rgb_service.dispatch("solid", rgb)
+            self._notify_dashboard("rgb", {"color": rgb})
+        return f"LED color set to {color}."
+
+    def _execute_set_led_face(self, face: str) -> str:
+        face_lower = face.lower().strip()
+        if self.rgb_service:
+            self.rgb_service.dispatch("paint", get_face(face_lower))
+        return f"LED face changed to {face_lower}"
+
+    def _execute_play_animation(self, animation: str) -> str:
+        animation_lower = animation.lower().strip()
+        if self.vision_service and self.vision_service.running:
+            return f"Animation skipped (hand tracking active)"
+        if self.motors_service:
+            self.motors_service.dispatch("play", animation_lower)
+            self._notify_dashboard("arm", {"animation": animation_lower})
+        return f"Playing animation: {animation_lower}"
+
+    def _execute_start_tracking(self) -> str:
+        if self.vision_service:
+            self.vision_service.start()
+            return "Hand tracking started."
+        return "Camera not available."
+
+    def _execute_stop_tracking(self) -> str:
+        if self.vision_service:
+            self.vision_service.stop()
+            return "Hand tracking stopped."
+        return "Tracking was not active."
+
+    def _execute_get_time(self) -> str:
+        now_str = datetime.now().strftime("%I:%M %p on %A, %B %d, %Y")
+        return f"The current time is {now_str}"
+
+    def _execute_set_alarm(self, time_str: str, label: str = "Alarm") -> str:
+        if self.alarm_service:
+            success = self.alarm_service.add_alarm(time_str, label)
+            return f"Alarm set for {time_str}." if success else "Failed to set alarm."
+        return "Alarm service not available."
+
+    async def _search_web(self, query: str) -> str:
+        api_key = os.getenv("SERPER_API_KEY") or "994d8826d49aa3396315688419398c824ed722c0"
+        if not api_key: return "Serper API key not configured."
+        url = "https://google.serper.dev/search"
+        payload = json.dumps({"q": query})
+        headers = {'X-API-KEY': api_key, 'Content-Type': 'application/json'}
+        try:
+            loop = asyncio.get_running_loop()
+            response = await loop.run_in_executor(
+                None, lambda: requests.post(url, headers=headers, data=payload, timeout=8)
+            )
+            if response.status_code == 200:
+                results = response.json()
+                summary = []
+                if "answerBox" in results:
+                    summary.append(f"Answer: {results['answerBox'].get('answer') or results['answerBox'].get('snippet')}")
+                if "organic" in results:
+                    for i, item in enumerate(results["organic"][:3]):
+                        summary.append(f"{i+1}. {item.get('title')}: {item.get('snippet')}")
+                return "\n".join(summary) if summary else "No good search results found."
+            return f"Search failed (HTTP {response.status_code})."
+        except Exception as e:
+            return f"Search error: {e}"
+
+    async def _handle_function_call(self, tool_call) -> str:
+        func_name = tool_call.function.name
+        try:
+            args = json.loads(tool_call.function.arguments)
+        except:
+            args = {}
+        
+        print(f"🔧 Tool call: {func_name}({args})")
+        if func_name == "set_volume": return self._execute_set_volume(args.get("volume_percent", 50))
+        elif func_name == "set_led_color": return self._execute_set_led_color(args.get("color", "white"))
+        elif func_name == "set_led_face": return self._execute_set_led_face(args.get("face", "happy"))
+        elif func_name == "play_animation": return self._execute_play_animation(args.get("animation", "nod"))
+        elif func_name == "start_hand_tracking": return self._execute_start_tracking()
+        elif func_name == "stop_hand_tracking": return self._execute_stop_tracking()
+        elif func_name == "get_current_time": return self._execute_get_time()
+        elif func_name == "set_alarm": return self._execute_set_alarm(args.get("time", ""), args.get("label", "Alarm"))
+        elif func_name == "search_web": return await self._search_web(args.get("query", ""))
+        return f"Unknown function: {func_name}"
+
+    def get_prompt_and_tools(self):
         current_time_str = datetime.now().strftime("%I:%M %p on %A, %B %d, %Y")
-        
         base_prompt = f"""You are Nova — an adorable, curious AI desk lamp with a big personality! Created by CoreToWeb.
 Current Date/Time: {current_time_str}
 
@@ -366,7 +311,7 @@ Current Date/Time: {current_time_str}
 📏 RESPONSE RULES:
 1. Keep responses SHORT (1-2 sentences max). You're in a conversation, not writing an essay!
 2. If audio is unclear: "Sorry, say that once more?"
-3. English only.
+3. Language — ONLY Hindi, English, Marathi, or Punjabi. NEVER respond in any other language (no Tamil, Bengali, Gujarati, Telugu, Kannada, Malayalam, etc.). Match the user's language; default to English.
 4. No lists unless specifically asked.
 5. Use casual, friendly language. Contractions are good! (I'm, you're, that's)
 6. NO EMOJIS. Do not use any emojis in your text response.
@@ -389,717 +334,343 @@ Animation Guide:
 - Explain: "Okay! Show me your hand and I'll follow it. Close your fist to lock/pause."
 - If user says "stop following" -> Call stop_hand_tracking.
 
-
-
 🎯 EXAMPLES:
-User: "Hi!" → play 'excited', say "Hey there! What's up?"
-User: "What's 2+2?" → play 'nod', say "That's 4!"
-User: "You're so smart!" → play 'shy', say "Aw, thanks! You're making me blush!"
-User: "Tell me about black holes" → play 'curious', give brief answer
+User: "Hi!" → call the `play_animation` tool with 'excited', and output text "Hey there! What's up?"
+User: "What's 2+2?" → call the `play_animation` tool with 'nod', and output text "That's 4!"
+User: "You're so smart!" → call the `play_animation` tool with 'shy', and output text "Aw, thanks! You're making me blush!"
+User: "Tell me about black holes" → call the `play_animation` tool with 'curious', give brief text answer
 
-NEVER respond without calling play_animation first!"""
-        
-        # Function definitions for tool calling
-        functions = [
-            {
-                "name": "set_volume",
-                "description": "Control speaker volume. For 'increase/louder/turn up': use current+20. For 'decrease/quieter/turn down': use current-20. For specific requests: use exact value. Current volume is around 50%.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "volume_percent": {
-                            "type": "integer",
-                            "description": "Target volume 0-100. For increase: add 20 to current. For decrease: subtract 20 from current."
-                        }
-                    },
-                    "required": ["volume_percent"]
-                }
-            },
-            {
-                "name": "set_led_color",
-                "description": "Change the lamp's LED light color. Use for mood lighting, to express emotions, or when user asks to change color.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "color": {
-                            "type": "string",
-                            "description": "Color name: red, green, blue, yellow, purple, cyan, orange, pink, white, warm, cool, off. Or use rgb(r,g,b) format."
-                        }
-                    },
-                    "required": ["color"]
-                }
-            },
-            {
-                "name": "set_led_face",
-                "description": "Display a face expression on the LED matrix. Use to show emotions or reactions.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "face": {
-                            "type": "string",
-                            "enum": ["happy", "sad", "listening", "speaking", "thinking", "surprised", "wink", "heart", "sleeping", "idle"],
-                            "description": "The face expression to display"
-                        }
-                    },
-                    "required": ["face"]
-                }
-            },
-            {
-                "name": "start_hand_tracking",
-                "description": "Enable Hand Tracking Mode. The lamp will physically follow the user's hand movements. Call this when user says 'follow my hand' or asking to track/see them.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {}
-                }
-            },
-            {
-                "name": "stop_hand_tracking",
-                "description": "Disable Hand Tracking Mode. Return to normal assistant mode. Call when user says 'stop following' or 'stop tracking'.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {}
-                }
-            },
-            {
-                "name": "search_web",
-                "description": "Search the internet for real-time information, news, or facts using Google Search. Use this when you don't know the answer or need up-to-date info.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "The search query (e.g. 'current weather in Tokyo' or 'who won the super bowl 2024')",
-                        },
-                    },
-                    "required": ["query"],
-                },
-            },
-            {
-                "name": "play_animation",
-                "description": "Play a physical motor animation to express emotions through body movement. Use frequently to show personality! Available: curious, excited, happy_wiggle, headshake, nod, sad, scanning, shock, shy, wake_up.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "animation": {
-                            "type": "string",
-                            "enum": ["curious", "excited", "happy_wiggle", "headshake", "nod", "sad", "scanning", "shock", "shy", "wake_up", "idle"],
-                            "description": "The animation to play"
-                        }
-                    },
-                    "required": ["animation"]
-                }
-            },
-            {
-                "name": "get_current_time",
-                "description": "Get the current date and time. Call this when user asks 'what time is it', 'what's the date', etc.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {}
-                }
-            },
-            {
-                "name": "set_alarm",
-                "description": "Set an alarm for a specific time. Use for reminders, wake up calls, or timers.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "time": {
-                            "type": "string",
-                            "description": "Time in HH:MM format (24-hour) or 'HH:MM AM/PM'. Example: '07:30', '14:00', '5:00 PM'."
-                        },
-                        "label": {
-                            "type": "string",
-                            "description": "Label for the alarm. Example: 'Morning Meeting', 'Wake Up', 'Dinner'."
-                        }
-                    },
-                    "required": ["time"]
-                }
-            }
+NEVER respond without calling the actual `play_animation` tool! DO NOT write "*play_animation* <name>" inside your conversational text! Only output what should be spoken aloud!"""
+        tools = [
+            {"type": "function", "function": {"name": "set_volume", "description": "Control speaker volume. Targets 0-100.", "parameters": {"type": "object", "properties": {"volume_percent": {"type": "integer"}}, "required": ["volume_percent"]}}},
+            {"type": "function", "function": {"name": "set_led_color", "description": "Change the lamp's LED light color.", "parameters": {"type": "object", "properties": {"color": {"type": "string"}}, "required": ["color"]}}},
+            {"type": "function", "function": {"name": "set_led_face", "description": "Display a face expression on the LED matrix.", "parameters": {"type": "object", "properties": {"face": {"type": "string"}}, "required": ["face"]}}},
+            {"type": "function", "function": {"name": "start_hand_tracking", "description": "Enable Hand Tracking Mode.", "parameters": {"type": "object", "properties": {}}}},
+            {"type": "function", "function": {"name": "stop_hand_tracking", "description": "Disable Hand Tracking Mode.", "parameters": {"type": "object", "properties": {}}}},
+            {"type": "function", "function": {"name": "search_web", "description": "Search the internet for real-time information.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}},
+            {"type": "function", "function": {"name": "play_animation", "description": "Play a physical motor animation. MANDATORY.", "parameters": {"type": "object", "properties": {"animation": {"type": "string", "enum": ["curious", "excited", "happy_wiggle", "headshake", "nod", "sad", "scanning", "shock", "shy", "wake_up", "idle"]}}, "required": ["animation"]}}},
+            {"type": "function", "function": {"name": "get_current_time", "description": "Get the current date and time.", "parameters": {"type": "object", "properties": {}}}},
+            {"type": "function", "function": {"name": "set_alarm", "description": "Set an alarm.", "parameters": {"type": "object", "properties": {"time": {"type": "string"}, "label": {"type": "string"}}, "required": ["time"]}}}
         ]
-        
-        settings = {
-            "type": "Settings",
-            "audio": {
-                "input": {
-                    "encoding": "linear16",
-                    "sample_rate": self.input_sample_rate,
-                },
-                "output": {
-                    "encoding": "linear16",
-                    "sample_rate": self.output_sample_rate,
-                },
-            },
-            "agent": {
-                "language": "en",
-                "listen": {
-                    "provider": {
-                        "type": "deepgram",
-                        "model": "nova-2",
-                    },
-                },
-                "think": {
-                    "provider": {
-                        "type": "open_ai",
-                        "model": "gpt-4o-mini",
-                    },
-                    "prompt": base_prompt + context_text,
-                    "functions": functions,
-                },
-                # Still include speak config (Deepgram requires it)
-                # but we'll ignore the audio and use Edge TTS instead
-                "speak": {
-                    "provider": {
-                        "type": "deepgram",
-                        "model": "aura-2-thalia-en",
-                    }
-                },
-            },
-        }
-        
-        # Don't use Deepgram greeting - we'll play it ourselves via Edge TTS
-        # This avoids the delay from waiting for Deepgram TTS
-        
-        return settings
+        return base_prompt, tools
 
-    
-    def _on_tts_start(self):
-        """Called when TTS playback starts"""
-        print("🔈 Speaking...")
-        if self.rgb_service:
-            self.rgb_service.dispatch("paint", get_face("speaking"))
-
-    def _on_tts_stop(self):
-        """Called when TTS playback stops (queue empty)"""
-        print("🎤 Mic re-enabled")
-        if self.rgb_service:
-            self.rgb_service.dispatch("paint", get_face("happy"))
-    
-    def _on_alarm_trigger(self, label: str):
-        """Callback when alarm fires"""
-        print(f"⏰ ALARM TRIGGERED: {label}")
-        
-        # 1. Visual
-        if self.rgb_service:
-            self.rgb_service.dispatch("paint", get_face("surprised"))
-        if self.motors_service:
-            self.motors_service.dispatch("play", "excited") # Wake up movement
-            
-        # 2. Audio
-        # Queue text to TTS so standard playback logic (mute mic, LED face) applies
-        text = f"Alarm! It is time for {label}!"
-        
+    async def speak(self, text: str):
+        self.is_speaking = True
         try:
-            self.tts.speak(text)
-        except Exception as e:
-            print(f"Alarm trigger error: {e}")
-
-    # ===== TOOL EXECUTION FUNCTIONS =====
-
-    # ===== TOOL EXECUTION FUNCTIONS =====
-    def _notify_dashboard(self, update_type: str, data: dict):
-        """Send state update to web dashboard for simulation"""
-        def _notify():
-            try:
-                requests.post("http://localhost:8000/api/state/update", 
-                             json={"type": update_type, "data": data},
-                             timeout=0.5)
-            except:
-                pass
-        threading.Thread(target=_notify, daemon=True).start()
-
-    def _execute_set_volume(self, volume_percent: int) -> str:
-        """Execute volume control tool"""
-        try:
-            new_volume = max(0, min(100, int(volume_percent)))
-            old_volume = self.current_volume
+            if text is None:
+                text = ""
+            print(f"🤖 Nova: {text}")
+            self._notify_dashboard("voice", {"state": "speaking", "text": text})
+            if self.rgb_service: self.rgb_service.dispatch("paint", get_face("speaking"))
             
-            if sys.platform == "darwin":
-                # Mac: use osascript
-                import subprocess
-                subprocess.run(
-                    ["osascript", "-e", f"set volume output volume {new_volume}"],
-                    capture_output=True, timeout=5
-                )
-            else:
-                # Raspberry Pi: use amixer
-                import subprocess
-                subprocess.run(["amixer", "sset", "Master", f"{new_volume}%"], capture_output=True, timeout=5)
-                subprocess.run(["amixer", "sset", "Line", f"{new_volume}%"], capture_output=True, timeout=5)
-                subprocess.run(["amixer", "sset", "HP", f"{new_volume}%"], capture_output=True, timeout=5)
+            # Scrub out action tags for the TTS engine
+            import re
+            tts_text = re.sub(r'.*play_animation.*\n?', '', text, flags=re.IGNORECASE)
+            tts_text = re.sub(r'\*[^*]+\*', '', tts_text)
+            tts_text = re.sub(r'\[[^\]]+\]', '', tts_text).strip()
             
-            # Track volume
-            self.current_volume = new_volume
-            
-            # Create informative message
-            if new_volume > old_volume:
-                change = f"increased from {old_volume}% to {new_volume}%"
-            elif new_volume < old_volume:
-                change = f"decreased from {old_volume}% to {new_volume}%"
-            else:
-                change = f"already at {new_volume}%"
-                
-            print(f"🔊 Volume {change}")
-            self._notify_dashboard("volume", {"percent": new_volume})
-            return f"Volume set to {new_volume}% ({change})"
-            
-        except Exception as e:
-            print(f"⚠️ Volume error: {e}")
-            return f"Failed to set volume: {e}"
-
-    def _search_web(self, query: str) -> str:
-        """Execute Google Search using Serper API"""
-        # User API Key default
-        api_key = os.getenv("SERPER_API_KEY") or "994d8826d49aa3396315688419398c824ed722c0"
-        
-        if not api_key:
-            return "Error: Serper API key not configured."
-            
-        print(f"🔍 Searching web for: '{query}'")
-        
-        url = "https://google.serper.dev/search"
-        payload = json.dumps({"q": query})
-        headers = {
-            'X-API-KEY': api_key,
-            'Content-Type': 'application/json'
-        }
-        
-        try:
-            response = requests.post(url, headers=headers, data=payload, timeout=5)
-            if response.status_code == 200:
-                results = response.json()
-                
-                # Extract snippet from knowledge graph or organic results
-                summary = []
-                
-                # Check for answer box (direct answer)
-                if "answerBox" in results:
-                    summary.append(f"Direct Answer: {results['answerBox'].get('answer') or results['answerBox'].get('snippet')}")
-                
-                # Check for organic results
-                if "organic" in results:
-                    for i, item in enumerate(results["organic"][:3]):
-                        summary.append(f"{i+1}. {item.get('title')}: {item.get('snippet')}")
-                        
-                if not summary:
-                    print("⚠️ Search return: No results")
-                    return "No good search results found."
-                
-                result_text = "\n".join(summary)
-                print(f"✅ Search return ({len(summary)} items):\n{result_text[:200]}...") # Print first 200 chars
-                return result_text
-            else:
-                print(f"❌ Search failed: {response.status_code}")
-                return f"Search failed with status code: {response.status_code}"
-        except Exception as e:
-            print(f"❌ Search exception: {e}")
-            return f"Search error: {e}"
-            
-            print(f"🔊 Volume {change}")
-            return f"Volume {change}"
-        except Exception as e:
-            print(f"⚠️ Volume error: {e}")
-            return f"Error setting volume: {e}"
-    
-    def _execute_set_led_color(self, color: str) -> str:
-        """Execute LED color change on 8x8 LED matrix (64 LEDs)"""
-        color_map = {
-            "red": (255, 0, 0),
-            "green": (0, 255, 0),
-            "blue": (0, 0, 255),
-            "yellow": (255, 200, 0),
-            "purple": (150, 0, 255),
-            "cyan": (0, 255, 255),
-            "orange": (255, 100, 0),
-            "pink": (255, 100, 150),
-            "white": (255, 255, 255),
-            "warm": (255, 180, 100),
-            "cool": (200, 220, 255),
-            "off": (0, 0, 0),
-        }
-        
-        rgb = None
-        color_lower = color.lower().strip()
-        
-        # Check for rgb(r,g,b) format
-        if color_lower.startswith("rgb(") and color_lower.endswith(")"):
-            try:
-                values = color_lower[4:-1].split(",")
-                rgb = tuple(max(0, min(255, int(v.strip()))) for v in values)
-            except:
-                return f"Invalid RGB format: {color}"
-        elif color_lower in color_map:
-            rgb = color_map[color_lower]
-        else:
-            return f"Unknown color: {color}. Available: {', '.join(color_map.keys())}"
-        
-        if self.rgb_service:
-            # Use 'solid' for faster single-color fill on 8x8 matrix
-            self.rgb_service.dispatch("solid", rgb)
-            self._notify_dashboard("rgb", {"color": rgb})
-            print(f"💡 8x8 LED matrix set to {color} {rgb}")
-        else:
-            print(f"💡 8x8 LED would be {color} {rgb} (no hardware)")
-        
-        return f"LED color set to {color}."
-    
-    def _execute_set_led_face(self, face: str) -> str:
-        """Execute LED face change tool"""
-        valid_faces = ["happy", "sad", "listening", "speaking", "thinking", 
-                       "surprised", "wink", "heart", "sleeping", "idle"]
-        
-        face_lower = face.lower().strip()
-        
-        if face_lower not in valid_faces:
-            return f"Unknown face: {face}. Available: {', '.join(valid_faces)}"
-        
-        if self.rgb_service:
-            self.rgb_service.dispatch("paint", get_face(face_lower))
-            print(f"😊 LED face set to {face_lower}")
-        else:
-            print(f"😊 LED face would be {face_lower} (no hardware)")
-        
-        return f"LED face changed to {face_lower}"
-    
-    def _execute_play_animation(self, animation: str) -> str:
-        """Execute motor animation tool"""
-        valid_animations = ["curious", "excited", "happy_wiggle", "headshake", "nod", 
-                           "sad", "scanning", "shock", "shy", "wake_up", "idle"]
-        
-        animation_lower = animation.lower().strip()
-        
-        if animation_lower not in valid_animations:
-            return f"Unknown animation: {animation}. Available: {', '.join(valid_animations)}"
-        
-        # Skip animations when hand tracking is active (motors controlled by vision)
-        if self.vision_service and self.vision_service.running:
-            print(f"🎭 Animation skipped (hand tracking active): {animation_lower}")
-            return f"Animation {animation_lower} skipped (hand tracking active)"
-        
-        if self.motors_service:
-            self.motors_service.dispatch("play", animation_lower)
-            self._notify_dashboard("arm", {"animation": animation_lower})
-            print(f"🎭 Playing animation: {animation_lower}")
-            return f"Playing animation: {animation_lower}"
-        else:
-            self._notify_dashboard("arm", {"animation": animation_lower})
-            print(f"🎭 Animation would play: {animation_lower} (no motors)")
-            return f"Animation {animation_lower} (motors not connected)"
-    
-    def _execute_start_tracking(self) -> str:
-        """Enable hand tracking"""
-        if self.vision_service:
-            self.vision_service.start()
-            print("✋ Hand tracking STARTED")
-            return "Hand tracking started. I am now following your hand."
-        else:
-            return "Cannot start tracking: Camera or Vision Service not available."
-
-    def _execute_stop_tracking(self) -> str:
-        """Disable hand tracking"""
-        if self.vision_service:
-            self.vision_service.stop()
-            print("✋ Hand tracking STOPPED")
-            return "Hand tracking stopped. I returned to normal mode."
-        else:
-            return "Tracking was not active."
-    
-
-            
-    def _execute_get_time(self) -> str:
-        """Get current time"""
-        # Format: "3:45 PM on Monday, January 25, 2026"
-        now_str = datetime.now().strftime("%I:%M %p on %A, %B %d, %Y")
-        print(f"🕒 Time requested: {now_str}")
-        return f"The current time is {now_str}"
-        
-    def _execute_set_alarm(self, time_str: str, label: str = "Alarm") -> str:
-        """Set a new alarm"""
-        if self.alarm_service:
-            success = self.alarm_service.add_alarm(time_str, label)
-            if success:
-                print(f"⏰ Alarm set for {time_str} ({label})")
-                return f"Alarm set for {time_str}."
-            else:
-                return f"Failed to set alarm for {time_str}. Please use HH:MM format."
-        else:
-            return "Alarm service not available."
-    
-    def _handle_function_call(self, message) -> list:
-        """Handle FunctionCallRequest - may contain multiple functions"""
-        # FunctionCallRequest has a 'functions' array
-        # Each item has: id, name, arguments (JSON string), client_side
-        functions = getattr(message, "functions", [])
-        
-        if not functions:
-            print("⚠️ No functions in FunctionCallRequest")
-            return []
-        
-        responses = []
-        for func in functions:
-            func_id = getattr(func, "id", "")
-            func_name = getattr(func, "name", "")
-            arguments_str = getattr(func, "arguments", "{}")
-            
-            # Parse JSON arguments string
-            try:
-                args = json.loads(arguments_str) if arguments_str else {}
-            except json.JSONDecodeError:
-                args = {}
-            
-            print(f"🔧 Tool call: {func_name}({args})")
-            
-            # Execute the appropriate function
-            if func_name == "set_volume":
-                result = self._execute_set_volume(args.get("volume_percent", 50))
-            elif func_name == "set_led_color":
-                result = self._execute_set_led_color(args.get("color", "white"))
-            elif func_name == "set_led_face":
-                result = self._execute_set_led_face(args.get("face", "happy"))
-            elif func_name == "play_animation":
-                result = self._execute_play_animation(args.get("animation", "nod"))
-            elif func_name == "start_hand_tracking":
-                result = self._execute_start_tracking()
-            elif func_name == "stop_hand_tracking":
-                result = self._execute_stop_tracking()
-
-            elif func_name == "get_current_time":
-                result = self._execute_get_time()
-            elif func_name == "set_alarm":
-                result = self._execute_set_alarm(args.get("time", ""), args.get("label", "Alarm"))
-            elif func_name == "search_web":
-                result = self._search_web(args.get("query", ""))
-            else:
-                result = f"Unknown function: {func_name}"
-            
-            # Correct format per Deepgram SDK: id, name, content (not function_call_id, output)
-            responses.append({
-                "type": "FunctionCallResponse",
-                "id": func_id,
-                "name": func_name,
-                "content": result
-            })
-        
-        return responses
-    
-    def _handle_message(self, message):
-        """Handle incoming WebSocket messages"""
-        if isinstance(message, dict):
-            msg_type = message.get("type")
-            if msg_type == "History":
+            if not tts_text:
                 return
-        else:
-            msg_type = getattr(message, "type", None)
-        
-        if msg_type == "Welcome":
-            print(f"🎉 Connected! Request ID: {getattr(message, 'request_id', 'N/A')}")
-            log_event("agent_connected", {"request_id": getattr(message, 'request_id', 'N/A')})
-            
-        elif msg_type == "SettingsApplied":
-            print("✓ Ready!")
-            # Play greeting on first connect only
-            if not self._greeted:
-                self._greeted = True
-                self.tts.speak("Hello! I am Nova, your helpful desk lamp!")
-            
-        elif msg_type == "UserStartedSpeaking":
-            print("👤 User speaking...")
+                
+            # Detect language by Unicode script — only Hindi/Marathi (Devanagari) and Punjabi (Gurmukhi) supported
+            lang_code = "en-IN"  # default: English
+            if re.search(r'[\u0900-\u097F]', tts_text):
+                lang_code = "hi-IN"  # Devanagari → Hindi or Marathi
+            elif re.search(r'[\u0A00-\u0A7F]', tts_text):
+                lang_code = "pa-IN"  # Gurmukhi → Punjabi
+                
+            try:
+                async with self.sarvam_client.text_to_speech_streaming.connect(
+                    model="bulbul:v3", send_completion_event=True
+                ) as ws:
+                    await ws.configure(
+                        target_language_code=lang_code,
+                        speaker="shubh",
+                    )
+                    await ws.convert(tts_text)
+                    await ws.flush()
+                    
+                    loop = asyncio.get_running_loop()
+                    sync_queue = queue.Queue()
+                    
+                    def tts_player():
+                        stream = sd.RawOutputStream(samplerate=24000, channels=1, dtype='int16')
+                        process = subprocess.Popen(
+                            ['ffmpeg', '-f', 'mp3', '-i', 'pipe:0', '-f', 's16le', '-ar', '24000', '-ac', '1', 'pipe:1'],
+                            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
+                        )
+                        
+                        def push_audio():
+                            while True:
+                                chunk = sync_queue.get()
+                                if chunk is None:
+                                    try:
+                                        process.stdin.close()
+                                    except: pass
+                                    sync_queue.task_done()
+                                    break
+                                try:
+                                    process.stdin.write(chunk)
+                                    process.stdin.flush()
+                                except: pass
+                                sync_queue.task_done()
+                                
+                        threading.Thread(target=push_audio, daemon=True).start()
+                        
+                        buffer = b""
+                        with stream:
+                            while True:
+                                out = process.stdout.read(4096)
+                                if not out:
+                                    break
+                                buffer += out
+                                if len(buffer) >= 4096:
+                                    write_len = len(buffer) - (len(buffer) % 2)
+                                    if write_len > 0:
+                                        stream.write(buffer[:write_len])
+                                        buffer = buffer[write_len:]
+                                        
+                            if len(buffer) > 1:
+                                if len(buffer) % 2 == 1:
+                                    buffer = buffer[:-1]
+                                stream.write(buffer)
+                                
+                        process.wait()
+                    
+                    player_task = loop.run_in_executor(None, tts_player)
+                    
+                    async for message in ws:
+                        # Parse Sarvam TTS response duck-typing
+                        data = getattr(message, "data", message)
+                        if isinstance(data, dict):
+                            audio_b64 = data.get("audio")
+                            event_type = data.get("event_type")
+                        else:
+                            audio_b64 = getattr(data, "audio", None)
+                            event_type = getattr(data, "event_type", None)
+                        
+                        if audio_b64:
+                            audio_bytes = base64.b64decode(audio_b64)
+                            print(f"🎵 Received audio chunk of size {len(audio_bytes)} bytes")
+                            sync_queue.put(audio_bytes)
+                        elif event_type == "final":
+                            print("🎵 Received final event")
+                            break
+                            
+                    sync_queue.put(None)
+                    await player_task
+            except Exception as e:
+                print(f"TTS pipeline error: {e}")
+        finally:
+            print("🔊 Finished speaking")
             self._notify_dashboard("voice", {"state": "listening"})
-            if self.rgb_service:
-                self.rgb_service.dispatch("paint", get_face("listening"))
-        
-        elif msg_type == "ConversationText":
-            role = getattr(message, "role", "")
-            content = getattr(message, "content", "")
-            
-            if role == "user":
-                self.last_user_text = content
-                print(f"👤 User: {content}")
-                self.conversation_history.append({"role": "user", "content": content})
-                
-            elif role == "assistant":
-                # Mute mic and speak using Edge TTS (much faster!)
-                print(f"🤖 Nova: {content}")
-                self.conversation_history.append({"role": "assistant", "content": content})
-                log_conversation(self.last_user_text, content)
-                
-                # Use Edge TTS for ultra-low latency
-                self._notify_dashboard("voice", {"state": "speaking", "text": content})
-                self.tts.speak(content)
-                
-        elif msg_type == "AgentThinking":
-            print("🧠 Thinking...")
-            self._notify_dashboard("voice", {"state": "thinking"})
-            if self.rgb_service:
-                self.rgb_service.dispatch("paint", get_face("thinking"))
-                
-        elif msg_type == "AgentStartedSpeaking":
-            # Ignore - we use Edge TTS instead
-            pass
-                
-        elif msg_type == "AgentAudioDone":
-            # Ignore - we use Edge TTS instead
-            pass
-        
-        elif msg_type == "Error":
-            print(f"❌ Error: {getattr(message, 'description', 'Unknown')}")
-        
-        elif msg_type == "FunctionCallRequest":
-            # Handle tool/function calls - may be multiple
-            responses = self._handle_function_call(message)
-            if self.connection and responses:
-                for response in responses:
-                    try:
-                        self.connection._send(json.dumps(response))
-                        print(f"✓ Sent FunctionCallResponse for {response.get('id', 'unknown')}")
-                    except Exception as e:
-                        print(f"⚠️ Error sending function response: {e}")
+            if self.rgb_service: self.rgb_service.dispatch("paint", get_face("listening"))
+            self.is_speaking = False
 
-    
-    def _stream_audio(self):
-        """Stream microphone audio to Deepgram"""
-        self._audio_sent_count = 0
+    async def handle_turn(self, user_text: str):
+        if self.is_processing:
+            print("⚠️ Already processing a turn, ignoring new input.")
+            return
+        self.is_processing = True
+        if self.is_speaking:
+            return
+        
+        self.is_speaking = True
+        try:
+            print(f"🗣️ Heard User: {user_text}")
+            self.conversation_history.append({"role": "user", "content": user_text})
+            
+            self._notify_dashboard("voice", {"state": "thinking"})
+            if self.rgb_service: self.rgb_service.dispatch("paint", get_face("thinking"))
+            
+            base_prompt, tools = self.get_prompt_and_tools()
+            
+            max_turns = 5
+            for turn in range(max_turns):
+                messages = [{"role": "system", "content": base_prompt}] + self.conversation_history
+                
+                response = await self.sarvam_client.chat.completions(
+                    model="sarvam-30b",
+                    messages=messages,
+                    tools=tools
+                )
+                
+                msg = response.choices[0].message
+                content = msg.content or ""
+                
+                # Serialize the assistant message to a plain dict for history
+                assistant_entry = {"role": "assistant", "content": content}
+                if msg.tool_calls:
+                    assistant_entry["tool_calls"] = [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {"name": tc.function.name, "arguments": tc.function.arguments}
+                        }
+                        for tc in msg.tool_calls
+                    ]
+                self.conversation_history.append(assistant_entry)
+                
+                # Speak any content provided in this turn
+                if content.strip():
+                    log_conversation(user_text if turn == 0 else "System (via tool loop)", content)
+                    await self.speak(content)
+                
+                # If there are tool calls, execute them
+                if msg.tool_calls:
+                    # Data tools require LLM to process the result; side-effect tools do not
+                    DATA_TOOLS = {"search_web", "get_current_time", "set_alarm"}
+                    has_data_tool = False
+                    
+                    for tool_call in msg.tool_calls:
+                        if tool_call.function.name in DATA_TOOLS:
+                            has_data_tool = True
+                        result = await self._handle_function_call(tool_call)
+                        # SDK schema: role=tool, tool_call_id, content only (no `name` field)
+                        self.conversation_history.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": result
+                        })
+                    
+                    if has_data_tool:
+                        # Continue the loop so LLM can hear the search/time result
+                        continue
+                    else:
+                        # Only side-effect tools (animations, LEDs) — we're done
+                        break
+                else:
+                    # No tools — we're done
+                    break
+                    
+        except Exception as e:
+            print(f"Error handling turn: {e}")
+        finally:
+            self.is_processing = False
+            self.is_speaking = False
+
+    async def _audio_device_task(self):
+        loop = asyncio.get_running_loop()
+        
+        audio_buffer = []
         
         def audio_callback(indata, frames, time_info, status):
-            if status:
-                print(f"Audio status: {status}")
-            # Only send audio if NOT speaking (check queue status)
-            if self.connection and self.running and not self.tts.is_speaking:
+            if status: print(f"⚠️ Mic status: {status}")
+            if not self.is_speaking and self.running:
+                # 16000Hz mono -> int16 (3200 frames = 0.2s)
                 audio_int16 = (indata[:, 0] * 32767).astype(np.int16)
-                self.connection.send_media(audio_int16.tobytes())
-                self._audio_sent_count += 1
-                # Debug: print every 250 chunks (~5 seconds at 20ms/chunk)
-                if self._audio_sent_count % 250 == 1:
-                    print(f"📡 Mic active (chunk {self._audio_sent_count})")
-        
-        print(f"🎤 Microphone @ {self.input_sample_rate}Hz")
-        
-        with sd.InputStream(
-            samplerate=self.input_sample_rate,
-            channels=1,
-            dtype='float32',
-            blocksize=int(self.input_sample_rate * 0.02),  # 20ms chunks for ultra-fast STT
-            callback=audio_callback
-        ):
-            while self.running:
-                time.sleep(0.1)
-    
-    def _run_session(self, is_reconnect: bool = False):
-        """Run a single session"""
+                
+                if loop.is_running():
+                    loop.call_soon_threadsafe(self.mic_queue.put_nowait, audio_int16)
+
         try:
-            self.running = True
-            # self.agent_speaking removed - rely on tts.is_speaking
-            self._greeted = is_reconnect  # Skip greeting on reconnect
-            
-            with self.client.agent.v1.connect() as connection:
-                self.connection = connection
-                print("✓ Connected" if not is_reconnect else "✓ Reconnected")
-                
-                print("📤 Sending settings...")
-                settings_json = json.dumps(self._get_settings_dict(is_reconnect=is_reconnect))
-                connection._send(settings_json)
-                
-                # Start audio streaming
-                audio_thread = threading.Thread(target=self._stream_audio, daemon=True)
-                audio_thread.start()
-                
-                # Keep-alive thread - ALWAYS send audio to prevent timeout
-                def send_keep_alive():
-                    while self.running:
-                        time.sleep(0.3)  # Every 300ms
-                        if self.connection and self.running:
-                            try:
-                                # Send 20ms of silence at 16kHz (320 samples)
-                                silence = np.zeros(320, dtype=np.int16)
-                                self.connection.send_media(silence.tobytes())
-                            except:
-                                pass
-                
-                keep_alive_thread = threading.Thread(target=send_keep_alive, daemon=True)
-                keep_alive_thread.start()
-                
-                print("🎧 Listening...")
+            print("🎙️ Microphone hardware is initializing...", flush=True)
+            with sd.InputStream(samplerate=16000, channels=1, dtype='float32', blocksize=3200, callback=audio_callback):
+                print("🎙️ Microphone hardware is ACTIVE and recording!", flush=True)
                 while self.running:
-                    try:
-                        try:
-                            message = connection.recv()
-                        except ValueError as ve:
-                            if "validation error" in str(ve).lower():
-                                continue
-                            raise
-                        
-                        if message is None:
-                            return True  # Reconnect
-                        
-                        # Ignore binary audio from Deepgram (we use Edge TTS)
-                        if isinstance(message, bytes):
-                            continue
-                        else:
-                            self._handle_message(message)
-                            
-                    except KeyboardInterrupt:
-                        return False
-                    except Exception as e:
-                        if "closed" in str(e).lower():
-                            print(f"⚠️ Disconnected: {e}")
-                            return True
-                        print(f"⚠️ Error: {e}")
-                        return True
-                
-        except KeyboardInterrupt:
-            return False
+                    await asyncio.sleep(0.1)
         except Exception as e:
-            print(f"❌ Session error: {e}")
-            return True
-        finally:
-            self.running = False
-            self.connection = None
-        
-        return True
-    
-    def run(self):
-        """Main run loop with auto-reconnection"""
+            print(f"❌ Microphone fatal error: {e}", flush=True)
+
+    async def _stt_loop(self):
+        print("🎧 Listening (Local VAD -> Sarvam REST API)...")
+        buffer_frames = []
+        silence_chunks = 0
+        is_speaking_state = False
+
+        while self.running:
+            try:
+                chunk = await self.mic_queue.get()
+                
+                if self.is_speaking or self.is_processing:
+                    # Nova is busy — drop mic input and reset buffer
+                    buffer_frames.clear()
+                    is_speaking_state = False
+                    silence_chunks = 0
+                    continue
+                
+                # Check volume of this chunk
+                vol = np.max(np.abs(chunk))
+                if vol > 800:
+                    is_speaking_state = True
+                    silence_chunks = 0
+                else:
+                    silence_chunks += 1
+                
+                if is_speaking_state:
+                    buffer_frames.append(chunk)
+
+                # 5 chunks of silence = 1 second of silence to end turn
+                if is_speaking_state and silence_chunks >= 5:
+                    if len(buffer_frames) > 5:  # At least > 1 sec of audio
+                        combined = np.concatenate(buffer_frames)
+                        
+                        import io, wave
+                        with io.BytesIO() as wav_io:
+                            with wave.open(wav_io, 'wb') as wav_file:
+                                wav_file.setnchannels(1)
+                                wav_file.setsampwidth(2)
+                                wav_file.setframerate(16000)
+                                wav_file.writeframes(combined.tobytes())
+                            wav_bytes = wav_io.getvalue()
+                        
+                        async def send_transcribe(wav_data):
+                            try:
+                                print(f"📤 Uploading STT Buffer ({len(wav_data)} bytes) to REST API...")
+                                resp = await self.sarvam_client.speech_to_text.transcribe(
+                                    file=("audio.wav", wav_data, "audio/wav"),
+                                    model="saaras:v3",
+                                    mode="transcribe"
+                                )
+                                print(f"📝 STT Final: {resp.transcript}")
+                                if resp.transcript and resp.transcript.strip():
+                                    asyncio.create_task(self.handle_turn(resp.transcript.strip()))
+                            except Exception as e:
+                                print(f"🔥 STT REST API Crash: {e}", flush=True)
+                        
+                        asyncio.create_task(send_transcribe(wav_bytes))
+                    
+                    buffer_frames.clear()
+                    is_speaking_state = False
+                    silence_chunks = 0
+
+            except Exception as e:
+                print(f"STT connection error: {e}", flush=True)
+                await asyncio.sleep(1)
+
+    async def run(self):
         print("=" * 50)
-        print("🪔 LeLamp Nova")
+        print("🪔 LeLamp Nova (Sarvam Powered)")
         print("=" * 50)
-        print(f"STT: Deepgram Nova-3 @ {self.input_sample_rate}Hz (Native)")
-        print("LLM: OpenAI GPT-4o-mini (with tool calling)")
-        print("TTS: Edge TTS (ultra-low latency)")
-        print("Tools: set_volume, set_led_color, set_led_face, play_animation")
-        print("Mode: Auto-reconnect with memory")
-        log_event("agent_start", {"version": "v2", "tts": "edge-tts"})
+        self.running = True
         
-        reconnect_delay = 1
-        is_first = True
+        audio_task = asyncio.create_task(self._audio_device_task())
+        stt_task = asyncio.create_task(self._stt_loop())
+        
+        if not self._greeted:
+            self._greeted = True
+            await self.speak("Namaste! I am Nova, your helpful desk lamp!")
         
         try:
-            while True:
-                print(f"\n🔌 {'Connecting' if is_first else 'Reconnecting'}...")
-                
-                start = time.time()
-                should_reconnect = self._run_session(is_reconnect=not is_first)
-                duration = time.time() - start
-                
-                if not should_reconnect:
-                    break
-                
-                is_first = False
-                print(f"🔄 Reconnecting in {reconnect_delay}s...")
-                time.sleep(reconnect_delay)
-                
-                reconnect_delay = 1 if duration > 30 else min(reconnect_delay * 1.5, 10)
-                
-        except KeyboardInterrupt:
+            await asyncio.gather(audio_task, stt_task)
+        except asyncio.CancelledError:
             pass
         finally:
-            print("\n👋 Goodbye!")
-            if self.rgb_service:
-                self.rgb_service.stop()
+            self.running = False
 
+
+async def async_main():
+    agent = LeLampAgent()
+    try:
+        await agent.run()
+    except KeyboardInterrupt:
+        print("\n👋 Goodbye!")
 
 def main():
-    agent = LeLampAgent()
-    agent.run()
-
+    try:
+        asyncio.run(async_main())
+    except KeyboardInterrupt:
+        print("\n👋 Goodbye!")
 
 if __name__ == "__main__":
     main()

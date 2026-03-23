@@ -21,6 +21,8 @@ dependencies = [
     "soundfile>=0.13.1",
     "opencv-python-headless",
     "protobuf",
+    "openai>=2.29.0",
+    "sarvamai>=0.1.27",
 ]
 
 [project.optional-dependencies]
