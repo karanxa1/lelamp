@@ -468,13 +468,10 @@ NEVER respond without calling the actual `play_animation` tool! DO NOT write "*p
             self.is_speaking = False
 
     async def handle_turn(self, user_text: str):
-        if self.is_processing:
-            print("⚠️ Already processing a turn, ignoring new input.")
+        if self.is_processing or self.is_speaking:
+            print("⚠️ Already busy, ignoring new input.")
             return
         self.is_processing = True
-        if self.is_speaking:
-            return
-        
         self.is_speaking = True
         try:
             print(f"🗣️ Heard User: {user_text}")
@@ -578,6 +575,17 @@ NEVER respond without calling the actual `play_animation` tool! DO NOT write "*p
         silence_chunks = 0
         is_speaking_state = False
 
+        # --- Adaptive noise floor calibration ---
+        print("🔇 Calibrating ambient noise floor... (2-3s)")
+        noise_samples = []
+        while len(noise_samples) < 30:
+            chunk = await self.mic_queue.get()
+            noise_samples.append(np.max(np.abs(chunk)))
+        noise_floor = float(np.mean(noise_samples))
+        vad_threshold = min(5000, max(300, int(noise_floor * 1.5)))
+        print(f"✅ Noise floor={noise_floor:.0f}, VAD threshold={vad_threshold} (speech must exceed this)", flush=True)
+        # -----------------------------------------
+
         while self.running:
             try:
                 chunk = await self.mic_queue.get()
@@ -589,9 +597,11 @@ NEVER respond without calling the actual `play_animation` tool! DO NOT write "*p
                     silence_chunks = 0
                     continue
                 
-                # Check volume of this chunk
+                # Check volume against adaptive threshold
                 vol = np.max(np.abs(chunk))
-                if vol > 800:
+                if vol > vad_threshold:
+                    if not is_speaking_state:
+                        print(f"🗣️ Voice detected (vol={vol}, threshold={vad_threshold})", flush=True)
                     is_speaking_state = True
                     silence_chunks = 0
                 else:
