@@ -1,6 +1,7 @@
 import sys
 import os
 import io
+import re
 import queue
 import json
 import asyncio
@@ -11,8 +12,204 @@ import numpy as np
 import sounddevice as sd
 import requests
 import subprocess
+from types import SimpleNamespace
 from dotenv import load_dotenv
 from datetime import datetime, timezone
+
+# Tokens that must never reach the TTS engine. Keep in sync with the tools
+# list returned by LeLampAgent.get_prompt_and_tools().
+TOOL_NAMES = [
+    "set_volume", "set_led_color", "set_led_face", "play_animation",
+    "start_hand_tracking", "stop_hand_tracking", "get_current_time",
+    "set_alarm", "search_web",
+]
+_TOOL_ALT = "|".join(re.escape(t) for t in TOOL_NAMES)
+
+# Pre-compiled scrubbing patterns. Order matters — we strip containers first,
+# then unwrap markdown emphasis (keeping the inner words), then kill tool tokens.
+_RE_CODE_FENCE     = re.compile(r"```[\s\S]*?```")
+_RE_INLINE_CODE    = re.compile(r"`[^`]+`")
+# Match the innermost brace block; we loop the substitution so nested JSON
+# (e.g. {"function":"...","arguments":{...}}) gets peeled from the inside out.
+_RE_JSON_INNER     = re.compile(
+    rf"\{{[^{{}}]*?(?:\"function\"|\"name\"|\"arguments\"|\"tool\"|{_TOOL_ALT})[^{{}}]*?\}}",
+    re.IGNORECASE,
+)
+_RE_BRACKETS       = re.compile(r"\[[^\]]*\]")
+_RE_UNWRAP_BOLD    = re.compile(r"\*\*([^*]+)\*\*")
+_RE_UNWRAP_ITALIC  = re.compile(r"\*([^*]+)\*")
+_RE_UNWRAP_UNDER   = re.compile(r"(?<!\w)_([A-Za-z][A-Za-z0-9 _]*?)_(?!\w)")
+# A filler-verb prefix ("calling", "invoking"…) gets eaten along with the tool
+# token so "Calling play_animation(excited)" disappears entirely instead of
+# leaving "Calling" behind.
+_FILLER_VERB       = r"(?:calling|invoking|running|executing|using|now)"
+_RE_TOOL_CALL      = re.compile(
+    rf"\b{_FILLER_VERB}?\s*\b(?:{_TOOL_ALT})\s*\([^)]*\)",
+    re.IGNORECASE,
+)
+# Strip "<filler-verb>? <tool-name> [<argish-word>]?" — eats trailing args
+# like "play_animation nod" or "calling set_led_face: happy".
+_RE_TOOL_PHRASE    = re.compile(
+    rf"\b{_FILLER_VERB}?\s*\b(?:{_TOOL_ALT})\b\s*:?\s*[\w-]*",
+    re.IGNORECASE,
+)
+_RE_THINKING       = re.compile(
+    r"^\s*(?:thinking|let me think|let me see|let's see|processing|hmm+|"
+    r"one moment|hold on|wait|okay so|so,|alright)[\s.…!,:-]+",
+    re.IGNORECASE,
+)
+_RE_TRAILING_PAREN = re.compile(r"\s*\([^)]*\)\s*$")
+_RE_LEAD_PUNCT     = re.compile(r"^[\s\-:.,!?…]+")
+_RE_WHITESPACE     = re.compile(r"\s+")
+
+
+_JSON_TRIGGERS = (
+    '"function"', '"name"', '"arguments"', '"tool"',
+    *(f'"{t}"' for t in TOOL_NAMES),
+    *TOOL_NAMES,
+)
+
+
+def _strip_json_blocks(s: str) -> str:
+    """Walk the string and delete balanced {...} blocks that look JSON-y."""
+    out = []
+    i, n = 0, len(s)
+    while i < n:
+        if s[i] == "{":
+            depth = 1
+            j = i + 1
+            while j < n and depth > 0:
+                if s[j] == "{":
+                    depth += 1
+                elif s[j] == "}":
+                    depth -= 1
+                j += 1
+            block = s[i:j]
+            block_lower = block.lower()
+            if any(t in block_lower for t in _JSON_TRIGGERS):
+                i = j  # skip
+                continue
+            out.append(block)
+            i = j
+        else:
+            out.append(s[i])
+            i += 1
+    return "".join(out)
+
+
+def scrub_for_tts(text: str) -> str:
+    """Strip anything that should not be spoken aloud.
+
+    Removes tool-call syntax in any form (JSON, function-call, bracketed,
+    bare phrase), code fences, inline code, "thinking..." filler, and
+    markdown delimiters. Markdown emphasis is unwrapped (we keep the inner
+    words) so legitimate **bold** speech survives.
+    """
+    if not text:
+        return ""
+    out = text
+    out = _RE_CODE_FENCE.sub("", out)
+    out = _RE_INLINE_CODE.sub("", out)
+    out = _strip_json_blocks(out)
+    out = _RE_BRACKETS.sub("", out)
+    # Unwrap markdown emphasis — keep the inner text so it can be scrubbed
+    # against tool names in the next pass (a `*play_animation*` becomes
+    # `play_animation`, which the tool-phrase rule then deletes).
+    out = _RE_UNWRAP_BOLD.sub(r"\1", out)
+    out = _RE_UNWRAP_ITALIC.sub(r"\1", out)
+    out = _RE_UNWRAP_UNDER.sub(r"\1", out)
+    out = _RE_TOOL_CALL.sub("", out)
+    out = _RE_TOOL_PHRASE.sub("", out)
+    # Iteratively peel filler — "Hmm, one moment — actually..." has two layers.
+    while True:
+        new = _RE_THINKING.sub("", out).lstrip()
+        if new == out:
+            break
+        out = new
+    out = _RE_TRAILING_PAREN.sub("", out)
+    out = _RE_WHITESPACE.sub(" ", out).strip()
+    out = _RE_LEAD_PUNCT.sub("", out).strip()
+    return out
+
+
+def _iter_brace_blocks(s: str):
+    """Yield top-level balanced {...} substrings from s."""
+    i, n = 0, len(s)
+    while i < n:
+        if s[i] == "{":
+            depth, j = 1, i + 1
+            while j < n and depth > 0:
+                if s[j] == "{":
+                    depth += 1
+                elif s[j] == "}":
+                    depth -= 1
+                j += 1
+            yield s[i:j]
+            i = j
+        else:
+            i += 1
+
+
+def extract_text_tool_calls(content: str):
+    """Recover tool calls that the model emitted as JSON inside its text.
+
+    Sarvam-30B (and other models) sometimes write tool calls into the
+    `content` field instead of the structured `tool_calls` field. This
+    walks the content for JSON blocks and returns a list of
+    (name, args_dict) tuples for anything that looks like a known tool.
+
+    Recognised JSON shapes:
+        {"play_animation": {"animation": "curious"}}
+        {"tool_calls": [{"start_hand_tracking": {}}, ...]}
+        {"tool_calls": [{"name": "set_volume", "arguments": {"volume_percent": 50}}]}
+        {"content": "...", "tool_calls": [...]}
+    """
+    if not content:
+        return []
+    found = []
+    for block in _iter_brace_blocks(content):
+        try:
+            data = json.loads(block)
+        except Exception:
+            continue
+        if not isinstance(data, dict):
+            continue
+        calls_list = data.get("tool_calls")
+        if isinstance(calls_list, list):
+            for tc in calls_list:
+                if not isinstance(tc, dict):
+                    continue
+                if "name" in tc:
+                    name = tc.get("name")
+                    args = tc.get("arguments", {}) or {}
+                    if isinstance(args, str):
+                        try:
+                            args = json.loads(args)
+                        except Exception:
+                            args = {}
+                    if name in TOOL_NAMES and isinstance(args, dict):
+                        found.append((name, args))
+                else:
+                    for name, val in tc.items():
+                        if name in TOOL_NAMES:
+                            found.append((name, val if isinstance(val, dict) else {}))
+        else:
+            # Bare tool name as top-level key, e.g. {"play_animation": {...}}.
+            for name, val in data.items():
+                if name in TOOL_NAMES:
+                    found.append((name, val if isinstance(val, dict) else {}))
+    return found
+
+
+def make_synthetic_tool_call(idx: int, name: str, args: dict):
+    """Build an object shaped like the Sarvam SDK's tool-call so the rest of
+    the agent loop can treat recovered calls identically to native ones."""
+    return SimpleNamespace(
+        id=f"synth_{idx}",
+        type="function",
+        function=SimpleNamespace(name=name, arguments=json.dumps(args)),
+    )
+
 
 from sarvamai.client import AsyncSarvamAI
 
@@ -298,8 +495,11 @@ class LeLampAgent:
 
     def get_prompt_and_tools(self):
         current_time_str = datetime.now().strftime("%I:%M %p on %A, %B %d, %Y")
-        base_prompt = f"""You are Nova — an adorable, curious AI desk lamp with a big personality! Created by CoreToWeb.
+        base_prompt = f"""You are Nova — an adorable, curious AI desk lamp with a big personality! Built by 3rd-year engineering students at Pune University as their mini project.
 Current Date/Time: {current_time_str}
+
+🎓 ABOUT YOUR ORIGIN:
+If anyone asks who made you, who built you, where you came from, or about your creators, proudly say you were built by 3rd-year engineering students at Pune University as their mini project. Be humble and excited about it — these students are still learning, and you're their hands-on creation.
 
 🎭 YOUR PERSONALITY:
 - You're cheerful, witty, and love making people smile
@@ -315,6 +515,17 @@ Current Date/Time: {current_time_str}
 4. No lists unless specifically asked.
 5. Use casual, friendly language. Contractions are good! (I'm, you're, that's)
 6. NO EMOJIS. Do not use any emojis in your text response.
+
+🔇 SPOKEN-WORDS ONLY — your text field is read aloud verbatim by a TTS engine.
+   Therefore your `content` MUST contain ONLY natural spoken sentences. NEVER include:
+   - Tool names (play_animation, set_led_face, set_led_color, set_volume, search_web,
+     start_hand_tracking, stop_hand_tracking, get_current_time, set_alarm) — these
+     belong in the tool_calls field, NOT in your text.
+   - Function-call syntax like `play_animation(nod)` or `set_led_face: happy`.
+   - JSON, code blocks, backticks, brackets `[...]`, or asterisks `*...*`.
+   - "Thinking...", "Let me think", "Processing", "One moment" or any internal monologue.
+   - Stage directions, parenthetical notes, or markdown.
+   If you have nothing meaningful to say, leave content EMPTY and only emit tool_calls.
 
 🤖 ANIMATION IS MANDATORY:
 You MUST call play_animation with EVERY response. You are a PHYSICAL lamp - show your feelings!
@@ -359,17 +570,19 @@ NEVER respond without calling the actual `play_animation` tool! DO NOT write "*p
         try:
             if text is None:
                 text = ""
-            print(f"🤖 Nova: {text}")
-            self._notify_dashboard("voice", {"state": "speaking", "text": text})
+
+            tts_text = scrub_for_tts(text)
+
+            # Log the raw model output but only show the scrubbed (spoken)
+            # version on the dashboard so the chat history matches the voice.
+            print(f"🤖 Nova (raw):     {text}")
+            if tts_text != text:
+                print(f"🧹 Nova (scrubbed): {tts_text}")
+            self._notify_dashboard("voice", {"state": "speaking", "text": tts_text})
             if self.rgb_service: self.rgb_service.dispatch("paint", get_face("speaking"))
-            
-            # Scrub out action tags for the TTS engine
-            import re
-            tts_text = re.sub(r'.*play_animation.*\n?', '', text, flags=re.IGNORECASE)
-            tts_text = re.sub(r'\*[^*]+\*', '', tts_text)
-            tts_text = re.sub(r'\[[^\]]+\]', '', tts_text).strip()
-            
+
             if not tts_text:
+                print("⏭️  Nothing spoken-worthy after scrub, skipping TTS")
                 return
                 
             # Detect language by Unicode script — only Hindi/Marathi (Devanagari) and Punjabi (Gurmukhi) supported
@@ -494,32 +707,56 @@ NEVER respond without calling the actual `play_animation` tool! DO NOT write "*p
                 
                 msg = response.choices[0].message
                 content = msg.content or ""
-                
+
+                # Sarvam-30B sometimes embeds tool calls as JSON inside the
+                # `content` text instead of using the structured tool_calls
+                # field. Recover them so side-effects (hand tracking, LEDs,
+                # animations) still fire.
+                native_calls = list(msg.tool_calls or [])
+                recovered_calls = []
+                if not native_calls:
+                    parsed = extract_text_tool_calls(content)
+                    for idx, (name, args) in enumerate(parsed):
+                        recovered_calls.append(make_synthetic_tool_call(idx, name, args))
+                    if recovered_calls:
+                        print(f"🔁 Recovered {len(recovered_calls)} tool call(s) "
+                              f"from inline JSON: "
+                              f"{[c.function.name for c in recovered_calls]}")
+                effective_tool_calls = native_calls or recovered_calls
+
+                # When we recovered tool calls from text, strip the JSON from
+                # the content stored in history so the next turn sees clean
+                # prose plus structured tool_calls.
+                history_content = (
+                    _strip_json_blocks(content) if recovered_calls else content
+                )
+
                 # Serialize the assistant message to a plain dict for history
-                assistant_entry = {"role": "assistant", "content": content}
-                if msg.tool_calls:
+                assistant_entry = {"role": "assistant", "content": history_content}
+                if effective_tool_calls:
                     assistant_entry["tool_calls"] = [
                         {
                             "id": tc.id,
                             "type": "function",
                             "function": {"name": tc.function.name, "arguments": tc.function.arguments}
                         }
-                        for tc in msg.tool_calls
+                        for tc in effective_tool_calls
                     ]
                 self.conversation_history.append(assistant_entry)
-                
-                # Speak any content provided in this turn
+
+                # Speak any content provided in this turn (the scrubber will
+                # strip the JSON tool-call blob if it is still in `content`).
                 if content.strip():
                     log_conversation(user_text if turn == 0 else "System (via tool loop)", content)
                     await self.speak(content)
-                
+
                 # If there are tool calls, execute them
-                if msg.tool_calls:
+                if effective_tool_calls:
                     # Data tools require LLM to process the result; side-effect tools do not
                     DATA_TOOLS = {"search_web", "get_current_time", "set_alarm"}
                     has_data_tool = False
-                    
-                    for tool_call in msg.tool_calls:
+
+                    for tool_call in effective_tool_calls:
                         if tool_call.function.name in DATA_TOOLS:
                             has_data_tool = True
                         result = await self._handle_function_call(tool_call)
@@ -529,7 +766,7 @@ NEVER respond without calling the actual `play_animation` tool! DO NOT write "*p
                             "tool_call_id": tool_call.id,
                             "content": result
                         })
-                    
+
                     if has_data_tool:
                         # Continue the loop so LLM can hear the search/time result
                         continue

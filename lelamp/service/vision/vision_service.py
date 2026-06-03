@@ -16,8 +16,28 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 class VisionService:
-    """Tracks hand using MediaPipe hand detection"""
-    
+    """Tracks hand using MediaPipe hand detection.
+
+    Hardware topology: 4 motors. Motor 3 (elbow_pitch) was physically removed;
+    motor 2 (base_pitch) is now at the old elbow position and carries all the
+    pitch motion. Motor 4 (wrist_roll) tilts the head sideways toward the hand
+    for a more lifelike "curious" follow.
+    """
+
+    # Motor IDs after the 5→4 conversion. Keep in sync with
+    # DirectMotorsService.MOTOR_IDS.
+    MOTOR_BASE_YAW   = 1
+    MOTOR_BASE_PITCH = 2
+    MOTOR_WRIST_ROLL = 4
+    MOTOR_WRIST_PITCH = 5
+
+    # Gain coefficients — empirically tuned for the single-joint arm.
+    # Negative signs depend on motor mount orientation; flip if the lamp
+    # moves the wrong way during hand tracking.
+    K_BASE_PITCH  = -1.0   # base_pitch carries the arm pitch alone
+    K_WRIST_PITCH = -0.3   # small head tilt for "looking at" the hand
+    K_WRIST_ROLL  = 0.15   # subtle head-tilt sideways toward the hand
+
     def __init__(self, motor_service=None, camera_index=0):
         if not MEDIAPIPE_AVAILABLE:
             raise ImportError("MediaPipe not available")
@@ -150,25 +170,27 @@ class VisionService:
         if not self.motor_service:
             print("❌ No motor service available")
             return
-        
-        # Base Yaw
-        yaw_offset = self.motor_service.offsets.get('base_yaw', 2048)
-        yaw_pos = int(yaw_offset + (yaw_deg / 180.0) * 2048)
-        self.motor_service._set_position(1, yaw_pos)
-        
-        # Pitch Logic (Inverse Kinematics approx)
-        k_base = -0.5
-        k_elbow = 0.8
-        k_wrist = -0.3
-        
-        bp_offset = self.motor_service.offsets.get('base_pitch', 2048)
-        bp_pos = int(bp_offset + (pitch_deg * k_base / 180.0) * 2048)
-        self.motor_service._set_position(2, bp_pos)
-        
-        ep_offset = self.motor_service.offsets.get('elbow_pitch', 2048)
-        ep_pos = int(ep_offset + (pitch_deg * k_elbow / 180.0) * 2048)
-        self.motor_service._set_position(3, ep_pos)
-        
-        wp_offset = self.motor_service.offsets.get('wrist_pitch', 2048)
-        wp_pos = int(wp_offset + (pitch_deg * k_wrist / 180.0) * 2048)
-        self.motor_service._set_position(5, wp_pos)
+
+        svc = self.motor_service
+
+        def drive(motor_id, offset_name, gain, axis_deg):
+            offset = svc.offsets.get(offset_name, 2048)
+            pos = int(offset + (axis_deg * gain / 180.0) * 2048)
+            # _set_position clamps to 0..4095 internally; clamp here too so
+            # we can detect when we're hitting a soft limit.
+            clamped = max(0, min(4095, pos))
+            if clamped != pos:
+                logger.debug(f"{offset_name} clamped: {pos} -> {clamped}")
+            svc._set_position(motor_id, clamped)
+
+        # Base Yaw — primary horizontal tracking.
+        drive(self.MOTOR_BASE_YAW, 'base_yaw', 1.0, yaw_deg)
+
+        # Pitch — single-joint arm: base_pitch does the heavy work,
+        # wrist_pitch adds a small head tilt so the lamp looks at the hand.
+        drive(self.MOTOR_BASE_PITCH,  'base_pitch',  self.K_BASE_PITCH,  pitch_deg)
+        drive(self.MOTOR_WRIST_PITCH, 'wrist_pitch', self.K_WRIST_PITCH, pitch_deg)
+
+        # Wrist Roll — banks the head sideways toward the hand for a
+        # curious "watching you" feel. Tiny gain; flip sign if it tilts away.
+        drive(self.MOTOR_WRIST_ROLL,  'wrist_roll',  self.K_WRIST_ROLL,  yaw_deg)

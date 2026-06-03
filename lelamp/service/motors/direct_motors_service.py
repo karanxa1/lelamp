@@ -26,7 +26,10 @@ class DirectMotorsService:
     ADDR_GOAL_POSITION = 42
     ADDR_PRESENT_POSITION = 56
     
-    MOTOR_NAMES = ['base_yaw', 'base_pitch', 'elbow_pitch', 'wrist_roll', 'wrist_pitch']
+    # Elbow_pitch (ID 3) removed — motor 2 was physically relocated to the
+    # elbow position; the original shoulder joint is now a rigid post.
+    MOTOR_NAMES = ['base_yaw', 'base_pitch', 'wrist_roll', 'wrist_pitch']
+    MOTOR_IDS   = [1,           2,            4,            5]
     
     def __init__(self, port: str, fps: int = 30, baudrate: int = 1000000):
         self.port = port
@@ -44,6 +47,7 @@ class DirectMotorsService:
         # Position offsets: current_position = offset + animation_value
         # Loaded from motor_offsets.json or default to 2048 (center)
         self.offsets = {name: 2048 for name in self.MOTOR_NAMES}
+        self._name_to_id = dict(zip(self.MOTOR_NAMES, self.MOTOR_IDS))
         self._load_offsets()
     
     def _load_offsets(self):
@@ -67,7 +71,7 @@ class DirectMotorsService:
             time.sleep(0.3)
             
             # Enable torque on all motors
-            for motor_id in range(1, 6):
+            for motor_id in self.MOTOR_IDS:
                 self._set_torque(motor_id, True)
             
             self.running = True
@@ -112,7 +116,7 @@ class DirectMotorsService:
         self.running = False
         if self.ser:
             # Disable torque
-            for motor_id in range(1, 6):
+            for motor_id in self.MOTOR_IDS:
                 self._set_torque(motor_id, False)
             self.ser.close()
             self.ser = None
@@ -146,9 +150,9 @@ class DirectMotorsService:
         # Smooth transition to home over 30 frames
         steps = 30
         for step in range(steps + 1):
-            for i, name in enumerate(self.MOTOR_NAMES, 1):
+            for motor_id, name in zip(self.MOTOR_IDS, self.MOTOR_NAMES):
                 offset = self.offsets.get(name, 2048)
-                self._set_position(i, offset)
+                self._set_position(motor_id, offset)
             time.sleep(1/30)
         
         logger.info("Home position reached")
@@ -220,9 +224,10 @@ class DirectMotorsService:
             
             for row in actions:
                 t0 = time.perf_counter()
-                
+
                 # Apply relative movement: current_offset + (frame_value - first_frame_value)
-                for i, name in enumerate(self.MOTOR_NAMES, 1):
+                # CSV elbow_pitch.pos column is silently skipped (motor removed).
+                for motor_id, name in zip(self.MOTOR_IDS, self.MOTOR_NAMES):
                     key = f"{name}.pos"
                     if key in row and name in base_degrees:
                         current_degrees = float(row[key])
@@ -231,7 +236,7 @@ class DirectMotorsService:
                         offset = self.offsets.get(name, 2048)
                         position = int(offset + (delta_degrees / 180.0) * 2048)
                         position = max(0, min(4095, position))
-                        self._set_position(i, position)
+                        self._set_position(motor_id, position)
                 
                 # Maintain FPS timing
                 elapsed = time.perf_counter() - t0
